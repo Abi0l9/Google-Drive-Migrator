@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Queue, Worker, JobsOptions, type ConnectionOptions } from "bullmq";
 import IORedis from "ioredis";
 import { env } from "@/lib/env";
@@ -7,6 +8,23 @@ let redisClient: IORedis | undefined;
 const queues = new Map<string, Queue>();
 const WORKER_HEARTBEAT_KEY = "gdm:worker:heartbeat";
 const WORKER_HEARTBEAT_TTL_SECONDS = 30;
+const CREATION_LOCK_TTL_MS = 10_000;
+const CREATION_LOCK_WAIT_ATTEMPTS = 10;
+const CREATION_LOCK_WAIT_MS = 100;
+
+const RELEASE_LOCK_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`;
+
+export class MigrationCreationLockBusyError extends Error {
+  constructor() {
+    super("Another migration request is already being processed for this account");
+    this.name = "MigrationCreationLockBusyError";
+  }
+}
 
 function getConnection() {
   if (!connection) {
@@ -66,6 +84,30 @@ export function createMigrationWorker<T>(name: string, processor: ConstructorPar
   return new Worker<T>(name, processor, { connection: getConnection(), concurrency });
 }
 
+export async function withMigrationCreationLock<T>(userId: string, operation: () => Promise<T>) {
+  const redis = getRedisClient();
+  const key = `gdm:migration-create-lock:${userId}`;
+  const token = randomUUID();
+  let acquired = false;
+
+  for (let attempt = 0; attempt < CREATION_LOCK_WAIT_ATTEMPTS; attempt += 1) {
+    const result = await redis.set(key, token, "PX", CREATION_LOCK_TTL_MS, "NX");
+    if (result === "OK") {
+      acquired = true;
+      break;
+    }
+    await sleep(CREATION_LOCK_WAIT_MS);
+  }
+
+  if (!acquired) throw new MigrationCreationLockBusyError();
+
+  try {
+    return await operation();
+  } finally {
+    await redis.eval(RELEASE_LOCK_SCRIPT, 1, key, token).catch(() => undefined);
+  }
+}
+
 export async function touchMigrationWorkerHeartbeat() {
   const heartbeatAt = new Date().toISOString();
   await getRedisClient().set(WORKER_HEARTBEAT_KEY, heartbeatAt, "EX", WORKER_HEARTBEAT_TTL_SECONDS);
@@ -90,4 +132,8 @@ export async function closeMigrationQueueResources() {
 
   redisClient = undefined;
   connection = undefined;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
