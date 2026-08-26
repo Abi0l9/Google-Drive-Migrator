@@ -1,0 +1,42 @@
+name: Dependency Fix
+
+on:
+  push:
+    branches:
+      - automation/gdm-dependency-fix
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply npm audit fixes
+        run: npm audit fix
+
+      - name: Verify production audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Save repaired dependency files
+        uses: actions/upload-artifact@v4
+        with:
+          name: repaired-dependencies
+          path: |
+            package.json
+            package-lock.json
+          if-no-files-found: error
