@@ -1,4 +1,4 @@
-export type MigrationStatus = "pending" | "scanning" | "running" | "completed" | "failed" | "cancelled";
+export type MigrationStatus = "pending" | "scanning" | "running" | "paused" | "completed" | "failed" | "cancelled";
 export type MigrationItemStatus = "pending" | "copying" | "completed" | "failed" | "skipped";
 export type MigrationItemType = "file" | "folder";
 
