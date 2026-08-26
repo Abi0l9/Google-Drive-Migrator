@@ -17,7 +17,12 @@ import {
 } from "@/lib/google/resumable-upload";
 import { classifyGoogleDriveError, googleDriveErrorDetails } from "@/lib/google/error-classification";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
-import { createMigrationWorker, getReportQueue, getTransferQueue } from "@/lib/queue/migrations";
+import {
+  createMigrationWorker,
+  getReportQueue,
+  getRetryQueue,
+  getTransferQueue,
+} from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
 import { MigrationItem } from "@/models/migration-item";
 import { User } from "@/models/user";
@@ -31,6 +36,10 @@ interface TransferJobData {
   itemId: string;
 }
 
+interface RetryJobData {
+  migrationId: string;
+}
+
 interface ClosableWorker {
   close(): Promise<void>;
 }
@@ -39,6 +48,13 @@ class MigrationCancelledError extends Error {
   constructor() {
     super("Migration cancelled");
     this.name = "MigrationCancelledError";
+  }
+}
+
+class MigrationPausedError extends Error {
+  constructor() {
+    super("Migration paused");
+    this.name = "MigrationPausedError";
   }
 }
 
@@ -53,14 +69,22 @@ export function registerMigrationWorkers() {
     await connectDb();
 
     try {
-      const migration = await Migration.findById(job.data.migrationId);
-      if (!migration) throw new Error("Migration not found");
-      if (migration.status === "cancelled") return;
+      const migration = await Migration.findOneAndUpdate(
+        { _id: job.data.migrationId, status: { $nin: ["cancelled", "paused"] } },
+        { $set: { status: "scanning" }, $unset: { errorMessage: "" } },
+        { new: true },
+      );
+      if (!migration) return;
 
-      migration.status = "scanning";
-      migration.startedAt = migration.startedAt ?? new Date();
-      migration.errorMessage = undefined;
-      await migration.save();
+      if (!migration.startedAt) {
+        await Migration.updateOne(
+          {
+            _id: migration._id,
+            $or: [{ startedAt: { $exists: false } }, { startedAt: null }],
+          },
+          { $set: { startedAt: new Date() } },
+        );
+      }
 
       const sourceDrive = publicDrive();
       const user = await User.findById(migration.userId);
@@ -108,11 +132,19 @@ export function registerMigrationWorkers() {
         mappings,
       );
 
-      await assertMigrationActive(migration._id.toString());
-      migration.status = "running";
-      migration.totalFiles = totals.files;
-      migration.totalBytes = totals.bytes;
-      await migration.save();
+      const runningMigration = await Migration.findOneAndUpdate(
+        { _id: migration._id, status: "scanning" },
+        {
+          $set: {
+            status: "running",
+            scanCompleted: true,
+            totalFiles: totals.files,
+            totalBytes: totals.bytes,
+          },
+        },
+        { new: true },
+      );
+      if (!runningMigration) return;
 
       const pendingFiles = await MigrationItem.find({
         migrationId: migration._id,
@@ -131,6 +163,8 @@ export function registerMigrationWorkers() {
 
       await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
     } catch (error) {
+      if (error instanceof MigrationPausedError) return;
+
       if (error instanceof MigrationCancelledError) {
         await MigrationItem.updateMany(
           { migrationId: job.data.migrationId, itemType: "file", status: "pending" },
@@ -147,7 +181,7 @@ export function registerMigrationWorkers() {
 
       if (finalFailure) {
         await Migration.updateOne(
-          { _id: job.data.migrationId },
+          { _id: job.data.migrationId, status: { $nin: ["paused", "cancelled"] } },
           {
             $set: {
               status: "failed",
@@ -174,6 +208,8 @@ export function registerMigrationWorkers() {
     const item = await MigrationItem.findById(job.data.itemId);
     const migration = await Migration.findById(job.data.migrationId);
     if (!item || !migration) throw new Error("Migration item not found");
+
+    if (migration.status === "paused") return;
 
     if (migration.status === "cancelled") {
       if (item.status !== "completed") {
@@ -258,7 +294,11 @@ export function registerMigrationWorkers() {
             const latestMigration = await Migration.findById(migration._id)
               .select("status")
               .lean<{ status?: string }>();
-            return Boolean(latestMigration && latestMigration.status !== "cancelled");
+            return Boolean(
+              latestMigration &&
+              latestMigration.status !== "cancelled" &&
+              latestMigration.status !== "paused"
+            );
           },
         });
         destinationFileId = uploaded.id;
@@ -290,11 +330,31 @@ export function registerMigrationWorkers() {
       const latestMigration = await Migration.findById(migration._id)
         .select("status")
         .lean<{ status?: string }>();
-      if (error instanceof ResumableUploadCancelledError || latestMigration?.status === "cancelled") {
+
+      if (latestMigration?.status === "paused") {
+        item.status = "pending";
+        item.errorMessage = undefined;
+        await item.save();
+        return;
+      }
+
+      if (latestMigration?.status === "cancelled") {
         item.status = "skipped";
         item.errorMessage = "Migration cancelled";
         await item.save();
         await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
+        return;
+      }
+
+      if (error instanceof ResumableUploadCancelledError) {
+        item.status = "pending";
+        item.errorMessage = undefined;
+        await item.save();
+        await getTransferQueue().add(
+          "resume-transfer-file",
+          { migrationId: migration._id.toString(), itemId: item._id.toString() },
+          { delay: 1000 },
+        );
         return;
       }
 
@@ -318,6 +378,29 @@ export function registerMigrationWorkers() {
       }
       throw error;
     }
+  }, 1));
+
+  workers.push(createMigrationWorker<RetryJobData>("retry", async (job: { data: RetryJobData }) => {
+    await connectDb();
+    const migration = await Migration.findById(job.data.migrationId);
+    if (!migration || migration.status !== "running" || !migration.scanCompleted) return;
+
+    const pendingFiles = await MigrationItem.find({
+      migrationId: migration._id,
+      itemType: "file",
+      status: "pending",
+    }).select("_id");
+
+    if (pendingFiles.length) {
+      await getTransferQueue().addBulk(
+        pendingFiles.map((item: { _id: { toString(): string } }) => ({
+          name: "resume-transfer-file",
+          data: { migrationId: migration._id.toString(), itemId: item._id.toString() },
+        })),
+      );
+    }
+
+    await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
   }, 1));
 
   workers.push(createMigrationWorker<ScanJobData>("report", async (job: { data: ScanJobData }) => {
@@ -380,13 +463,13 @@ async function scanFolder(
       includeItemsFromAllDrives: true,
     });
 
-    let filesSinceCancelCheck = 0;
+    let filesSinceStateCheck = 0;
     for (const file of response.data.files ?? []) {
-      if (filesSinceCancelCheck >= 50) {
+      if (filesSinceStateCheck >= 50) {
         await assertMigrationActive(migrationId);
-        filesSinceCancelCheck = 0;
+        filesSinceStateCheck = 0;
       }
-      filesSinceCancelCheck += 1;
+      filesSinceStateCheck += 1;
 
       const destinationFolderId = mappings.get(sourceFolderId);
       if (!file.id || !destinationFolderId) continue;
@@ -486,4 +569,5 @@ async function assertMigrationActive(migrationId: string) {
   const migration = await Migration.findById(migrationId).select("status").lean<{ status?: string }>();
   if (!migration) throw new Error("Migration not found");
   if (migration.status === "cancelled") throw new MigrationCancelledError();
+  if (migration.status === "paused") throw new MigrationPausedError();
 }
