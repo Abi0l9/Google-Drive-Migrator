@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gdm-jobs",
+  "main": "cloudflare/jobs/worker.ts",
+  "compatibility_date": "2026-08-26",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gdm",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./cloudflare/migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "MIGRATION_QUEUE",
+        "queue": "gdm-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "gdm-jobs",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "gdm-jobs-dlq",
+        "max_concurrency": 1
+      }
+    ]
+  },
+  "vars": {
+    "GDM_ZERO_COST_MODE": "true",
+    "GDM_DAILY_QUEUE_MESSAGE_BUDGET": "2200"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
