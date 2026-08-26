@@ -1,3 +1,4 @@
+// Bootstrap deployment used only to claim the stable workers.dev hostname before the full OpenNext cutover.
 export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
