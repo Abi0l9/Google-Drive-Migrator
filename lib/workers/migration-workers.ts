@@ -1,6 +1,13 @@
 import { drive_v3 } from "googleapis";
 import { connectDb } from "@/lib/db";
-import { FOLDER_MIME_TYPE, createDestinationFolder, publicDrive, streamCopyFile, userDrive } from "@/lib/google/drive";
+import {
+  FOLDER_MIME_TYPE,
+  createDestinationFolder,
+  findDestinationMigrationItem,
+  publicDrive,
+  streamCopyFile,
+  userDrive,
+} from "@/lib/google/drive";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { createMigrationWorker, getReportQueue, getTransferQueue } from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
@@ -46,14 +53,29 @@ export function registerMigrationWorkers() {
       const accessToken = await getFreshGoogleAccessToken(user);
       const destinationDrive = userDrive(accessToken);
 
+      const migrationMarker = {
+        migrationId: migration._id.toString(),
+        sourceId: migration.sourceFolderId,
+      };
       let rootDestinationId = migration.destinationRootFolderId as string | undefined;
       if (!rootDestinationId) {
-        const rootFolder = await createDestinationFolder(
+        const existingRoot = await findDestinationMigrationItem(
           destinationDrive,
-          migration.sourceFolderName,
           migration.destinationFolderId,
+          migrationMarker,
+          FOLDER_MIME_TYPE,
         );
-        rootDestinationId = rootFolder.id ?? undefined;
+
+        rootDestinationId = existingRoot?.id ?? undefined;
+        if (!rootDestinationId) {
+          const rootFolder = await createDestinationFolder(
+            destinationDrive,
+            migration.sourceFolderName,
+            migration.destinationFolderId,
+            migrationMarker,
+          );
+          rootDestinationId = rootFolder.id ?? undefined;
+        }
         if (!rootDestinationId) throw new Error("Unable to create destination root folder");
 
         migration.destinationRootFolderId = rootDestinationId;
@@ -139,13 +161,34 @@ export function registerMigrationWorkers() {
     try {
       const sourceDrive = publicDrive();
       const destinationDrive = userDrive(accessToken);
+      const marker = { migrationId: migration._id.toString(), sourceId: item.sourceFileId };
+      const existingCopy = await findDestinationMigrationItem(
+        destinationDrive,
+        item.destinationFolderId,
+        marker,
+      );
+
+      if (existingCopy?.id) {
+        item.destinationFileId = existingCopy.id;
+        item.status = "completed";
+        await item.save();
+        await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
+        return;
+      }
+
       const sourceFile = await sourceDrive.files.get({
         fileId: item.sourceFileId,
         fields: "id,name,mimeType,size",
         supportsAllDrives: true,
       });
 
-      const uploaded = await streamCopyFile(sourceDrive, destinationDrive, sourceFile.data, item.destinationFolderId);
+      const uploaded = await streamCopyFile(
+        sourceDrive,
+        destinationDrive,
+        sourceFile.data,
+        item.destinationFolderId,
+        marker,
+      );
       item.destinationFileId = uploaded.data.id;
       item.status = "completed";
       await item.save();
@@ -241,12 +284,25 @@ async function scanFolder(
         let childDestinationId = folderItem?.destinationFolderId as string | undefined;
 
         if (!childDestinationId) {
-          const destinationFolder = await createDestinationFolder(
+          const marker = { migrationId, sourceId: file.id };
+          const existingFolder = await findDestinationMigrationItem(
             destinationDrive,
-            file.name ?? "Untitled folder",
             destinationFolderId,
+            marker,
+            FOLDER_MIME_TYPE,
           );
-          if (!destinationFolder.id) throw new Error("Unable to create destination folder");
+          let destinationFolderIdForChild = existingFolder?.id ?? undefined;
+
+          if (!destinationFolderIdForChild) {
+            const destinationFolder = await createDestinationFolder(
+              destinationDrive,
+              file.name ?? "Untitled folder",
+              destinationFolderId,
+              marker,
+            );
+            destinationFolderIdForChild = destinationFolder.id ?? undefined;
+          }
+          if (!destinationFolderIdForChild) throw new Error("Unable to create destination folder");
 
           folderItem = await MigrationItem.findOneAndUpdate(
             { migrationId, sourceFileId: file.id },
@@ -255,7 +311,7 @@ async function scanFolder(
                 sourceName: file.name ?? "Untitled folder",
                 sourceMimeType: file.mimeType,
                 sourcePath: itemPath,
-                destinationFolderId: destinationFolder.id,
+                destinationFolderId: destinationFolderIdForChild,
                 itemType: "folder",
                 status: "completed",
                 size: 0,

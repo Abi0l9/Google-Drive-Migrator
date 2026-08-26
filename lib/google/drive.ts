@@ -128,16 +128,72 @@ async function scanFolderStats(drive: drive_v3.Drive, folderId: string): Promise
   return { files, folders, size };
 }
 
-export async function createDestinationFolder(drive: drive_v3.Drive, name: string, parentId?: string) {
+interface MigrationMarker {
+  migrationId: string;
+  sourceId: string;
+}
+
+function markerProperties(marker?: MigrationMarker) {
+  if (!marker) return undefined;
+  return { gdmMigrationId: marker.migrationId, gdmSourceId: marker.sourceId };
+}
+
+function escapeDriveQueryValue(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+export async function findDestinationMigrationItem(
+  drive: drive_v3.Drive,
+  parentId: string,
+  marker: MigrationMarker,
+  mimeType?: string,
+) {
+  const clauses = [
+    `'${escapeDriveQueryValue(parentId)}' in parents`,
+    "trashed = false",
+    `appProperties has { key='gdmMigrationId' and value='${escapeDriveQueryValue(marker.migrationId)}' }`,
+    `appProperties has { key='gdmSourceId' and value='${escapeDriveQueryValue(marker.sourceId)}' }`,
+  ];
+  if (mimeType) clauses.push(`mimeType='${escapeDriveQueryValue(mimeType)}'`);
+
+  const response = await drive.files.list({
+    q: clauses.join(" and "),
+    fields: "files(id,name,mimeType,size)",
+    pageSize: 2,
+    spaces: "drive",
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  return response.data.files?.[0];
+}
+
+export async function createDestinationFolder(
+  drive: drive_v3.Drive,
+  name: string,
+  parentId?: string,
+  marker?: MigrationMarker,
+) {
   const response = await drive.files.create({
-    requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: parentId ? [parentId] : undefined },
+    requestBody: {
+      name,
+      mimeType: FOLDER_MIME_TYPE,
+      parents: parentId ? [parentId] : undefined,
+      appProperties: markerProperties(marker),
+    },
     fields: "id,name",
     supportsAllDrives: true,
   });
   return response.data;
 }
 
-export async function streamCopyFile(source: drive_v3.Drive, destination: drive_v3.Drive, file: drive_v3.Schema$File, parentId: string) {
+export async function streamCopyFile(
+  source: drive_v3.Drive,
+  destination: drive_v3.Drive,
+  file: drive_v3.Schema$File,
+  parentId: string,
+  marker?: MigrationMarker,
+) {
   const exportConfig = file.mimeType ? workspaceExports[file.mimeType] : undefined;
   const sourceStream = exportConfig
     ? await source.files.export({ fileId: file.id!, mimeType: exportConfig.mimeType }, { responseType: "stream" })
@@ -146,7 +202,7 @@ export async function streamCopyFile(source: drive_v3.Drive, destination: drive_
   const name = exportConfig && !file.name?.endsWith(exportConfig.extension) ? `${file.name}${exportConfig.extension}` : file.name;
 
   return destination.files.create({
-    requestBody: { name, parents: [parentId] },
+    requestBody: { name, parents: [parentId], appProperties: markerProperties(marker) },
     media: { mimeType: exportConfig?.mimeType ?? file.mimeType ?? "application/octet-stream", body: sourceStream.data as Readable },
     fields: "id,name,size",
     supportsAllDrives: true,
