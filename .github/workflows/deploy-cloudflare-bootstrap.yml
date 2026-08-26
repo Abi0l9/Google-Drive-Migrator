@@ -1,0 +1,26 @@
+name: Deploy Cloudflare Bootstrap
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - cloudflare/bootstrap-worker.ts
+      - wrangler.bootstrap.jsonc
+      - .github/workflows/deploy-cloudflare-bootstrap.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Deploy bootstrap Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.125.0"
+          command: deploy --config wrangler.bootstrap.jsonc
