@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
+import { env } from "@/lib/env";
 import { extractDriveFolderId, userDrive, validateDestinationFolder } from "@/lib/google/drive";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
+import { canCreateActiveMigration } from "@/lib/migration/quota";
 import { getScanQueue } from "@/lib/queue/migrations";
 import { rateLimit } from "@/lib/rate-limit";
 import { Migration } from "@/models/migration";
@@ -68,6 +70,21 @@ export async function POST(request: Request) {
       status: existingMigration.status,
       reused: true,
     });
+  }
+
+  const activeMigrationCount = await Migration.countDocuments({
+    userId: user._id,
+    status: { $in: activeStatuses },
+  });
+
+  if (!canCreateActiveMigration(activeMigrationCount, env.maxActiveMigrationsPerUser)) {
+    return NextResponse.json(
+      {
+        error: `You already have ${activeMigrationCount} active migrations. Finish, cancel, or wait for one to complete before starting another.`,
+        maxActiveMigrations: env.maxActiveMigrationsPerUser,
+      },
+      { status: 429 },
+    );
   }
 
   const migration = await Migration.create({
