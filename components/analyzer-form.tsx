@@ -5,9 +5,116 @@ import { Button, Card } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
 import type { FolderAnalysis } from "@/types/migration";
 
+const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+const GOOGLE_API_SCRIPT = "https://apis.google.com/js/api.js";
+
 interface AnalyzerFormProps {
   isAuthenticated: boolean;
   authConfigured: boolean;
+}
+
+interface PickerView {
+  setIncludeFolders(enabled: boolean): PickerView;
+  setSelectFolderEnabled(enabled: boolean): PickerView;
+  setMimeTypes(mimeTypes: string): PickerView;
+  setMode(mode: string): PickerView;
+  setEnableDrives(enabled: boolean): PickerView;
+}
+
+interface PickerInstance {
+  setVisible(visible: boolean): void;
+}
+
+interface PickerBuilder {
+  addView(view: PickerView): PickerBuilder;
+  setOAuthToken(token: string): PickerBuilder;
+  setDeveloperKey(key: string): PickerBuilder;
+  setAppId(appId: string): PickerBuilder;
+  setOrigin(origin: string): PickerBuilder;
+  setMaxItems(max: number): PickerBuilder;
+  setCallback(callback: (data: Record<string, unknown>) => void): PickerBuilder;
+  build(): PickerInstance;
+}
+
+interface PickerNamespace {
+  PickerBuilder: new () => PickerBuilder;
+  DocsView: new (viewId?: string) => PickerView;
+  ViewId: { DOCS: string };
+  DocsViewMode: { LIST: string };
+  Action: { PICKED: string; CANCEL: string };
+  Response: { ACTION: string; DOCUMENTS: string };
+  Document: { ID: string; NAME: string; MIME_TYPE: string };
+}
+
+interface GoogleApiWindow extends Window {
+  gapi?: {
+    load(
+      apiName: string,
+      options: { callback: () => void; onerror?: () => void; timeout?: number; ontimeout?: () => void },
+    ): void;
+  };
+  google?: { picker?: PickerNamespace };
+}
+
+interface PickerBootstrap {
+  accessToken: string;
+  developerKey: string;
+  appId: string;
+  error?: string;
+}
+
+let pickerApiPromise: Promise<PickerNamespace> | null = null;
+
+function loadGooglePickerApi() {
+  if (typeof window === "undefined") return Promise.reject(new Error("Google Picker requires a browser"));
+
+  const googleWindow = window as GoogleApiWindow;
+  if (googleWindow.google?.picker) return Promise.resolve(googleWindow.google.picker);
+  if (pickerApiPromise) return pickerApiPromise;
+
+  pickerApiPromise = new Promise<PickerNamespace>((resolve, reject) => {
+    const loadPicker = () => {
+      if (!googleWindow.gapi) {
+        reject(new Error("Google API loader did not initialize"));
+        return;
+      }
+
+      googleWindow.gapi.load("picker", {
+        callback: () => {
+          const picker = googleWindow.google?.picker;
+          if (picker) resolve(picker);
+          else reject(new Error("Google Picker did not initialize"));
+        },
+        onerror: () => reject(new Error("Google Picker failed to load")),
+        timeout: 10_000,
+        ontimeout: () => reject(new Error("Google Picker took too long to load")),
+      });
+    };
+
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${GOOGLE_API_SCRIPT}"]`);
+    if (existingScript) {
+      if (googleWindow.gapi) loadPicker();
+      else {
+        existingScript.addEventListener("load", loadPicker, { once: true });
+        existingScript.addEventListener("error", () => reject(new Error("Google API script failed to load")), { once: true });
+      }
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = GOOGLE_API_SCRIPT;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener("load", loadPicker, { once: true });
+    script.addEventListener("error", () => reject(new Error("Google API script failed to load")), { once: true });
+    document.head.appendChild(script);
+  });
+
+  void pickerApiPromise.catch(() => {
+    pickerApiPromise = null;
+  });
+
+  return pickerApiPromise;
 }
 
 export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormProps) {
@@ -15,9 +122,11 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
   const [analysis, setAnalysis] = useState<FolderAnalysis | null>(null);
   const [destinationMode, setDestinationMode] = useState<"root" | "folder">("root");
   const [destinationFolderRef, setDestinationFolderRef] = useState("");
+  const [pickedDestinationName, setPickedDestinationName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [pickingDestination, setPickingDestination] = useState(false);
 
   async function analyze() {
     setLoading(true);
@@ -40,6 +149,72 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
       setError("Unable to reach Drive Migrator. Check your connection and try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function chooseDestinationFolder() {
+    if (!isAuthenticated) {
+      setError("Sign in with Google before choosing a Drive folder.");
+      return;
+    }
+
+    setPickingDestination(true);
+    setError(null);
+
+    try {
+      const [picker, response] = await Promise.all([
+        loadGooglePickerApi(),
+        fetch("/api/google/picker", { cache: "no-store" }),
+      ]);
+      const bootstrap = await response.json() as PickerBootstrap;
+
+      if (!response.ok) {
+        throw new Error(bootstrap.error ?? "Unable to open Google Picker");
+      }
+
+      const view = new picker.DocsView(picker.ViewId.DOCS)
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true)
+        .setMimeTypes(FOLDER_MIME_TYPE)
+        .setMode(picker.DocsViewMode.LIST)
+        .setEnableDrives(true);
+
+      await new Promise<void>((resolve) => {
+        const pickerInstance = new picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(bootstrap.accessToken)
+          .setDeveloperKey(bootstrap.developerKey)
+          .setAppId(bootstrap.appId)
+          .setOrigin(window.location.origin)
+          .setMaxItems(1)
+          .setCallback((data) => {
+            const action = data[picker.Response.ACTION];
+            if (action === picker.Action.PICKED) {
+              const documents = data[picker.Response.DOCUMENTS] as Array<Record<string, string>> | undefined;
+              const document = documents?.[0];
+              const folderId = document?.[picker.Document.ID];
+              const folderName = document?.[picker.Document.NAME];
+              const mimeType = document?.[picker.Document.MIME_TYPE];
+
+              if (!folderId || (mimeType && mimeType !== FOLDER_MIME_TYPE)) {
+                setError("Choose a Google Drive folder, not a file.");
+              } else {
+                setDestinationFolderRef(folderId);
+                setPickedDestinationName(folderName ?? "Selected Drive folder");
+              }
+              resolve();
+            } else if (action === picker.Action.CANCEL) {
+              resolve();
+            }
+          })
+          .build();
+
+        pickerInstance.setVisible(true);
+      });
+    } catch (pickerError) {
+      setError(pickerError instanceof Error ? pickerError.message : "Unable to open Google Picker");
+    } finally {
+      setPickingDestination(false);
     }
   }
 
@@ -123,15 +298,35 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
             </label>
 
             {destinationMode === "folder" ? (
-              <div className="space-y-2">
-                <input
-                  value={destinationFolderRef}
-                  onChange={(event) => setDestinationFolderRef(event.target.value)}
-                  placeholder="Paste destination folder URL or ID"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-                />
+              <div className="space-y-3">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button type="button" onClick={chooseDestinationFolder} disabled={pickingDestination || !isAuthenticated}>
+                    {pickingDestination ? "Opening Drive..." : "Choose from Google Drive"}
+                  </Button>
+                  {pickedDestinationName ? (
+                    <div className="flex flex-1 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                      Selected: {pickedDestinationName}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-slate-600" htmlFor="destinationFolderRef">
+                    Or paste a folder URL or ID
+                  </label>
+                  <input
+                    id="destinationFolderRef"
+                    value={destinationFolderRef}
+                    onChange={(event) => {
+                      setDestinationFolderRef(event.target.value);
+                      setPickedDestinationName(null);
+                    }}
+                    placeholder="https://drive.google.com/drive/folders/xxxxxxxx"
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+                  />
+                </div>
                 <p className="text-xs leading-5 text-slate-500">
-                  Drive Migrator validates write access before creating the migration.
+                  Picker is recommended because it grants Drive Migrator access only to the folder you choose. Pasted folders must already be accessible to the app.
                 </p>
               </div>
             ) : null}
