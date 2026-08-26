@@ -1,7 +1,19 @@
 import IORedis from "ioredis";
 import { env } from "@/lib/env";
 
-const localBuckets = new Map<string, { count: number; resetAt: number }>();
+export interface RateLimitBucket {
+  count: number;
+  resetAt: number;
+}
+
+export interface RateLimitResult {
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+  distributed: boolean;
+}
+
+const localBuckets = new Map<string, RateLimitBucket>();
 let redisClient: IORedis | undefined;
 
 const RATE_LIMIT_SCRIPT = `
@@ -29,13 +41,6 @@ function getRedisClient() {
   return redisClient;
 }
 
-export interface RateLimitResult {
-  allowed: boolean;
-  remaining: number;
-  resetAt: number;
-  distributed: boolean;
-}
-
 export async function rateLimit(key: string, limit = 20, windowMs = 60_000): Promise<RateLimitResult> {
   const safeLimit = Math.max(1, Math.floor(limit));
   const safeWindowMs = Math.max(1000, Math.floor(windowMs));
@@ -58,20 +63,27 @@ export async function rateLimit(key: string, limit = 20, windowMs = 60_000): Pro
       distributed: true,
     };
   } catch {
-    return localRateLimit(key, safeLimit, safeWindowMs);
+    return consumeLocalRateLimit(localBuckets, key, safeLimit, safeWindowMs);
   }
 }
 
-function localRateLimit(key: string, limit: number, windowMs: number): RateLimitResult {
-  const now = Date.now();
-  const current = localBuckets.get(key);
+export function consumeLocalRateLimit(
+  buckets: Map<string, RateLimitBucket>,
+  key: string,
+  limit: number,
+  windowMs: number,
+  now = Date.now(),
+): RateLimitResult {
+  const safeLimit = Math.max(1, Math.floor(limit));
+  const safeWindowMs = Math.max(1000, Math.floor(windowMs));
+  const current = buckets.get(key);
 
   if (!current || current.resetAt <= now) {
-    const resetAt = now + windowMs;
-    localBuckets.set(key, { count: 1, resetAt });
+    const resetAt = now + safeWindowMs;
+    buckets.set(key, { count: 1, resetAt });
     return {
       allowed: true,
-      remaining: limit - 1,
+      remaining: safeLimit - 1,
       resetAt,
       distributed: false,
     };
@@ -79,8 +91,8 @@ function localRateLimit(key: string, limit: number, windowMs: number): RateLimit
 
   current.count += 1;
   return {
-    allowed: current.count <= limit,
-    remaining: Math.max(limit - current.count, 0),
+    allowed: current.count <= safeLimit,
+    remaining: Math.max(safeLimit - current.count, 0),
     resetAt: current.resetAt,
     distributed: false,
   };
