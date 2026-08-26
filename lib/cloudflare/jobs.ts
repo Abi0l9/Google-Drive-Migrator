@@ -2,6 +2,7 @@ export type ScanFolderJob = {
   type: "scan-folder";
   migrationId: string;
   sourceFolderId: string;
+  sourceName: string;
   sourcePath: string;
   destinationFolderId: string;
   pageToken?: string;
