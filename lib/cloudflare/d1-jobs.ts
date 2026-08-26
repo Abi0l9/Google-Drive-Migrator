@@ -1,5 +1,29 @@
 import type { GdmMigration } from "@/lib/cloudflare/d1";
 
+const MIGRATION_RETURNING = `
+  id,
+  user_id AS userId,
+  source_folder_id AS sourceFolderId,
+  source_folder_url AS sourceFolderUrl,
+  source_folder_name AS sourceFolderName,
+  destination_folder_id AS destinationFolderId,
+  destination_folder_name AS destinationFolderName,
+  destination_root_folder_id AS destinationRootFolderId,
+  status,
+  scan_completed AS scanCompleted,
+  pending_scan_jobs AS pendingScanJobs,
+  total_files AS totalFiles,
+  completed_files AS completedFiles,
+  failed_files AS failedFiles,
+  total_bytes AS totalBytes,
+  copied_bytes AS copiedBytes,
+  error_message AS errorMessage,
+  started_at AS startedAt,
+  completed_at AS completedAt,
+  created_at AS createdAt,
+  updated_at AS updatedAt
+`;
+
 export function claimFolderScan(
   db: D1Database,
   migrationId: string,
@@ -100,27 +124,27 @@ export function markScanCompleteIfNoFoldersRemain(db: D1Database, migrationId: s
           AND item_type = 'folder'
           AND status IN ('pending','copying')
       )
-    RETURNING
-      id,
-      user_id AS userId,
-      source_folder_id AS sourceFolderId,
-      source_folder_url AS sourceFolderUrl,
-      source_folder_name AS sourceFolderName,
-      destination_folder_id AS destinationFolderId,
-      destination_folder_name AS destinationFolderName,
-      destination_root_folder_id AS destinationRootFolderId,
-      status,
-      scan_completed AS scanCompleted,
-      pending_scan_jobs AS pendingScanJobs,
-      total_files AS totalFiles,
-      completed_files AS completedFiles,
-      failed_files AS failedFiles,
-      total_bytes AS totalBytes,
-      copied_bytes AS copiedBytes,
-      error_message AS errorMessage,
-      started_at AS startedAt,
-      completed_at AS completedAt,
-      created_at AS createdAt,
-      updated_at AS updatedAt
+    RETURNING ${MIGRATION_RETURNING}
+  `).bind(migrationId, migrationId, migrationId, migrationId).first<GdmMigration>();
+}
+
+export function reconcileMigrationCounters(db: D1Database, migrationId: string) {
+  return db.prepare(`
+    UPDATE migrations
+    SET completed_files = (
+          SELECT COUNT(*) FROM migration_items
+          WHERE migration_id = ? AND item_type = 'file' AND status = 'completed'
+        ),
+        failed_files = (
+          SELECT COUNT(*) FROM migration_items
+          WHERE migration_id = ? AND item_type = 'file' AND status = 'failed'
+        ),
+        copied_bytes = COALESCE((
+          SELECT SUM(size) FROM migration_items
+          WHERE migration_id = ? AND item_type = 'file' AND status = 'completed'
+        ), 0),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+    RETURNING ${MIGRATION_RETURNING}
   `).bind(migrationId, migrationId, migrationId, migrationId).first<GdmMigration>();
 }
