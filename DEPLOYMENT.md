@@ -2,10 +2,10 @@
 
 GDM has two long-running application processes plus two managed data services:
 
-1. **Web** — Next.js standalone server. Handles auth, analysis, migration APIs, dashboards, and progress UI.
+1. **Web** — Next.js standalone server. Handles auth, analysis, migration APIs, dashboards, reports, and progress UI.
 2. **Worker** — BullMQ worker process. Handles folder scans, transfers, resumable uploads, retry/resume sweeps, and report refreshes.
 3. **MongoDB** — persistent migration/user/item state.
-4. **Redis** — BullMQ queues and delayed jobs.
+4. **Redis** — BullMQ queues, delayed jobs, distributed API rate limits, and worker heartbeat state.
 
 The web and worker must use the same MongoDB, Redis, Google OAuth credentials, and `TOKEN_ENCRYPTION_KEY`.
 
@@ -46,9 +46,12 @@ NEXTAUTH_SECRET=
 NEXTAUTH_URL=https://your-domain.example
 TOKEN_ENCRYPTION_KEY=
 ADMIN_EMAILS=admin@example.com
+MAX_ACTIVE_MIGRATIONS_PER_USER=3
 ```
 
-`GOOGLE_PICKER_API_KEY`, `NEXTAUTH_URL`, and `ADMIN_EMAILS` are primarily used by the web process, but keeping one shared environment definition is acceptable.
+`GOOGLE_PICKER_API_KEY`, `NEXTAUTH_URL`, `ADMIN_EMAILS`, and `MAX_ACTIVE_MIGRATIONS_PER_USER` are primarily web concerns, but keeping one shared environment definition is acceptable.
+
+`MAX_ACTIVE_MIGRATIONS_PER_USER` defaults to `3` when omitted or invalid. Pending, scanning, running, and paused migrations count as active. A repeated request for the same source and destination reuses its existing active migration before the active-migration cap is evaluated.
 
 ### Encryption-key rule
 
@@ -72,17 +75,19 @@ The web process exposes:
 GET /api/health
 ```
 
-It returns HTTP 200 only when both MongoDB and the BullMQ Redis connection are reachable. It returns HTTP 503 when either dependency is unavailable.
+MongoDB and Redis are readiness dependencies. If either is unavailable, the route returns HTTP 503.
 
-The production web Docker stage also includes a container `HEALTHCHECK` against this endpoint.
+The worker writes a Redis heartbeat every 10 seconds with a 30-second TTL. A missing worker heartbeat makes the JSON status `degraded` while the web route remains HTTP 200 if MongoDB and Redis are healthy. This avoids restarting a healthy web container merely because the separately deployed worker is down.
 
-The worker currently relies on process supervision plus queue health shown on the protected `/admin` page. A dedicated worker-heartbeat mechanism remains a future hardening item.
+The response includes `database`, `queue`, `worker`, and `workerHeartbeatAt`. The protected `/admin` page also displays worker heartbeat state and BullMQ queue counts.
+
+The production web Docker stage includes a container `HEALTHCHECK` against `/api/health`.
 
 ## Scaling
 
 ### Web
 
-Multiple web instances can share the same MongoDB and Redis services. Auth.js secrets and token-encryption keys must be identical across instances.
+Multiple web instances can share the same MongoDB and Redis services. Auth.js secrets and token-encryption keys must be identical across instances. API request throttling uses Redis-backed counters so limits are shared across replicas, with a process-local fallback during Redis failure.
 
 ### Worker
 
@@ -97,9 +102,10 @@ Start with conservative worker counts because Google Drive quotas apply to the p
 3. Deploy the worker image with its environment variables.
 4. Deploy the web image and expose port 3000 through HTTPS.
 5. Configure the final OAuth callback and Picker referrer restrictions for the production domain.
-6. Verify `/api/health` returns HTTP 200.
+6. Verify `/api/health` returns HTTP 200 and reports a fresh worker heartbeat.
 7. Sign in, choose a destination with Picker, and run a small migration before testing large/resumable files.
-8. Add an operator email to `ADMIN_EMAILS` and verify `/admin` queue health.
+8. Add an operator email to `ADMIN_EMAILS` and verify `/admin` queue and worker health.
+9. Test CSV/JSON report download after a completed migration.
 
 ## Rollback considerations
 
