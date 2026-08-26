@@ -1,3 +1,5 @@
+import { normalizeActiveMigrationLimit } from "@/lib/migration/quota";
+
 const adminEmails = (process.env.ADMIN_EMAILS ?? "")
   .split(",")
   .map((email) => email.trim().toLowerCase())
@@ -13,6 +15,7 @@ export const env = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   nextAuthSecret: process.env.NEXTAUTH_SECRET ?? "development-secret",
   tokenEncryptionKey: process.env.TOKEN_ENCRYPTION_KEY ?? process.env.NEXTAUTH_SECRET ?? "development-secret",
+  maxActiveMigrationsPerUser: normalizeActiveMigrationLimit(process.env.MAX_ACTIVE_MIGRATIONS_PER_USER),
   adminEmails,
 };
 
