@@ -218,7 +218,7 @@ async function queryResumableSession(sessionUrl: string, totalSize: number): Pro
   };
 }
 
-function parseConfirmedOffset(rangeHeader: string | null) {
+export function parseConfirmedOffset(rangeHeader: string | null) {
   if (!rangeHeader) return undefined;
   const match = rangeHeader.match(/bytes=0-(\d+)/i);
   if (!match) return undefined;
