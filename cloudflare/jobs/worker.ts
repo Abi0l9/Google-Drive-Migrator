@@ -8,8 +8,6 @@ import {
   getMigrationItemById,
   getMigrationItemBySource,
   getUserById,
-  incrementMigrationCompleted,
-  incrementMigrationFailed,
   listPendingFileItems,
   markPendingItemsSkipped,
   resetMigrationItemPending,
@@ -24,6 +22,7 @@ import {
   continueFolderScan,
   listPendingFolderItems,
   markScanCompleteIfNoFoldersRemain,
+  reconcileMigrationCounters,
 } from "@/lib/cloudflare/d1-jobs";
 import { FreeTierCapacityError } from "@/lib/cloudflare/free-tier";
 import {
@@ -242,6 +241,7 @@ async function processScanFolder(
 
   const completedScan = await markScanCompleteIfNoFoldersRemain(env.DB, migration.id);
   if (completedScan?.status === "running") {
+    await reconcileMigrationCounters(env.DB, migration.id);
     await publishMigrationJob(env, { type: "dispatch-pending", migrationId: migration.id });
   }
 }
@@ -255,6 +255,7 @@ async function processDispatchPending(env: CloudflareJobsEnv, job: DispatchPendi
     if (!folders.length) {
       const completed = await markScanCompleteIfNoFoldersRemain(env.DB, migration.id);
       if (completed?.status === "running") {
+        await reconcileMigrationCounters(env.DB, migration.id);
         await publishMigrationJob(env, { type: "dispatch-pending", migrationId: migration.id });
       }
       return;
@@ -280,6 +281,7 @@ async function processDispatchPending(env: CloudflareJobsEnv, job: DispatchPendi
   if (migration.status !== "running") return;
   const items = await listPendingFileItems(env.DB, migration.id, DISPATCH_BATCH_SIZE, job.cursor ?? "");
   if (!items.length) {
+    await reconcileMigrationCounters(env.DB, migration.id);
     await finalizeMigrationIfProcessed(env.DB, migration.id);
     return;
   }
@@ -317,7 +319,11 @@ async function processTransferFile(
     return;
   }
   if (migration.status !== "running") return;
-  if (currentItem.status === "completed" && currentItem.destinationFileId) return;
+  if (currentItem.status === "completed" && currentItem.destinationFileId) {
+    await reconcileMigrationCounters(env.DB, migration.id);
+    await finalizeMigrationIfProcessed(env.DB, migration.id);
+    return;
+  }
 
   const item = await claimMigrationItem(
     env.DB,
@@ -418,7 +424,7 @@ async function processTransferFile(
 
 async function finishTransferredItem(env: CloudflareJobsEnv, item: GdmMigrationItem, destinationFileId: string) {
   await completeMigrationItem(env.DB, item.id, destinationFileId, item.size);
-  await incrementMigrationCompleted(env.DB, item.migrationId, item.size);
+  await reconcileMigrationCounters(env.DB, item.migrationId);
   await finalizeMigrationIfProcessed(env.DB, item.migrationId);
 }
 
@@ -504,7 +510,7 @@ async function handleJobFailure(
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).bind(message.attempts, details.message, item.id).run();
-      await incrementMigrationFailed(env.DB, job.migrationId);
+      await reconcileMigrationCounters(env.DB, job.migrationId);
       await finalizeMigrationIfProcessed(env.DB, job.migrationId);
     }
     message.ack();
