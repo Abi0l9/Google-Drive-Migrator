@@ -18,6 +18,10 @@ const RETRYABLE_NETWORK_CODES = new Set([
   "EHOSTUNREACH",
 ]);
 
+const PERMANENT_APPLICATION_CODES = new Set([
+  "GDM_UNSUPPORTED_DRIVE_ITEM",
+]);
+
 interface ErrorLike {
   code?: unknown;
   status?: unknown;
@@ -30,6 +34,10 @@ interface ErrorLike {
 
 export function classifyGoogleDriveError(error: unknown): GoogleErrorClassification {
   const details = googleDriveErrorDetails(error);
+
+  if (details.networkCode && PERMANENT_APPLICATION_CODES.has(details.networkCode)) {
+    return "permanent";
+  }
 
   if (details.networkCode && RETRYABLE_NETWORK_CODES.has(details.networkCode)) {
     return "retryable";
