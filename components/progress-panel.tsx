@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Card } from "@/components/ui";
+import { useCallback, useEffect, useState } from "react";
+import { Button, Card } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
 import type { ProgressSnapshot } from "@/types/migration";
 
@@ -12,31 +12,58 @@ interface ProgressPanelProps {
 export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   const [progress, setProgress] = useState<ProgressSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadProgress() {
+  const loadProgress = useCallback(async () => {
+    try {
       const response = await fetch(`/api/migrations/${migrationId}`);
       const payload = await response.json();
-      if (cancelled) return;
+
       if (!response.ok) {
         setError(payload.error ?? "Unable to load migration progress");
         return;
       }
+
       setError(null);
       setProgress(payload);
+    } catch {
+      setError("Unable to refresh migration progress. Check your connection.");
     }
-
-    loadProgress();
-    const interval = window.setInterval(loadProgress, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
   }, [migrationId]);
 
-  if (error) {
+  useEffect(() => {
+    void loadProgress();
+    const interval = window.setInterval(() => {
+      void loadProgress();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [loadProgress]);
+
+  async function retryFailedFiles() {
+    setRetrying(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/migrations/${migrationId}/retry`, { method: "POST" });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to retry failed files");
+        return;
+      }
+
+      await loadProgress();
+    } catch {
+      setError("Unable to retry failed files. Check your connection and try again.");
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  if (error && !progress) {
     return <p className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p>;
   }
 
@@ -46,6 +73,8 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
 
   return (
     <div className="space-y-5">
+      {error ? <p className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}
+
       <Card>
         <div className="mb-3 flex items-center justify-between gap-4">
           <div>
@@ -71,6 +100,18 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
           <div><dt className="text-slate-500">Bytes copied</dt><dd className="font-medium">{formatBytes(progress.copiedBytes)} / {formatBytes(progress.totalBytes)}</dd></div>
         </dl>
       </Card>
+
+      {progress.status === "failed" && progress.failedFiles > 0 ? (
+        <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-950">Some files did not transfer.</h3>
+            <p className="text-sm text-slate-600">Retry only the failed files without rebuilding the migration.</p>
+          </div>
+          <Button onClick={retryFailedFiles} disabled={retrying}>
+            {retrying ? "Retrying..." : `Retry ${progress.failedFiles} failed`}
+          </Button>
+        </Card>
+      ) : null}
     </div>
   );
 }
