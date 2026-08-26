@@ -4,7 +4,13 @@ import { Card } from "@/components/ui";
 import { connectDb } from "@/lib/db";
 import { isAdminEmail } from "@/lib/env";
 import { formatBytes } from "@/lib/format";
-import { getReportQueue, getRetryQueue, getScanQueue, getTransferQueue } from "@/lib/queue/migrations";
+import {
+  getMigrationWorkerHeartbeat,
+  getReportQueue,
+  getRetryQueue,
+  getScanQueue,
+  getTransferQueue,
+} from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
 import { User } from "@/models/user";
 
@@ -21,9 +27,16 @@ interface QueueSnapshot {
   failed: number;
 }
 
+interface QueueHealth {
+  online: boolean;
+  workerOnline: boolean;
+  workerHeartbeatAt?: string;
+  queues: QueueSnapshot[];
+}
+
 const activeStatuses = ["pending", "scanning", "running", "paused"];
 
-async function loadQueueHealth(): Promise<{ online: boolean; queues: QueueSnapshot[] }> {
+async function loadQueueHealth(): Promise<QueueHealth> {
   const queueEntries = [
     ["Scan", getScanQueue()],
     ["Transfer", getTransferQueue()],
@@ -32,19 +45,28 @@ async function loadQueueHealth(): Promise<{ online: boolean; queues: QueueSnapsh
   ] as const;
 
   try {
-    const queues = await Promise.all(queueEntries.map(async ([name, queue]) => {
-      const counts = await queue.getJobCounts("waiting", "active", "delayed", "failed");
-      return {
-        name,
-        waiting: counts.waiting ?? 0,
-        active: counts.active ?? 0,
-        delayed: counts.delayed ?? 0,
-        failed: counts.failed ?? 0,
-      };
-    }));
-    return { online: true, queues };
+    const [queues, workerHeartbeatAt] = await Promise.all([
+      Promise.all(queueEntries.map(async ([name, queue]) => {
+        const counts = await queue.getJobCounts("waiting", "active", "delayed", "failed");
+        return {
+          name,
+          waiting: counts.waiting ?? 0,
+          active: counts.active ?? 0,
+          delayed: counts.delayed ?? 0,
+          failed: counts.failed ?? 0,
+        };
+      })),
+      getMigrationWorkerHeartbeat(),
+    ]);
+
+    return {
+      online: true,
+      workerOnline: Boolean(workerHeartbeatAt),
+      workerHeartbeatAt: workerHeartbeatAt ?? undefined,
+      queues,
+    };
   } catch {
-    return { online: false, queues: [] };
+    return { online: false, workerOnline: false, queues: [] };
   }
 }
 
@@ -83,14 +105,19 @@ export default async function AdminPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <div className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-          <p className="mt-2 text-sm text-slate-600">Operational view for migrations, users, and BullMQ health.</p>
+          <p className="mt-2 text-sm text-slate-600">Operational view for migrations, users, workers, and BullMQ health.</p>
         </div>
-        <span className={`w-fit rounded-full px-3 py-1 text-xs font-medium ${queueHealth.online ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
-          Redis queues {queueHealth.online ? "online" : "unavailable"}
-        </span>
+        <div className="flex flex-wrap gap-2">
+          <span className={`w-fit rounded-full px-3 py-1 text-xs font-medium ${queueHealth.online ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+            Redis queues {queueHealth.online ? "online" : "unavailable"}
+          </span>
+          <span className={`w-fit rounded-full px-3 py-1 text-xs font-medium ${queueHealth.workerOnline ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
+            Worker {queueHealth.workerOnline ? "online" : "heartbeat missing"}
+          </span>
+        </div>
       </div>
 
       <section className="grid gap-4 md:grid-cols-3">
@@ -103,9 +130,14 @@ export default async function AdminPage() {
       </section>
 
       <section className="mt-8">
-        <div className="mb-3">
-          <h2 className="text-xl font-semibold text-slate-950">Queue health</h2>
-          <p className="text-sm text-slate-600">Waiting, active, delayed, and failed jobs by worker queue.</p>
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-950">Queue health</h2>
+            <p className="text-sm text-slate-600">Waiting, active, delayed, and failed jobs by worker queue.</p>
+          </div>
+          {queueHealth.workerHeartbeatAt ? (
+            <p className="text-xs text-slate-500">Last worker heartbeat: {new Date(queueHealth.workerHeartbeatAt).toLocaleString()}</p>
+          ) : null}
         </div>
 
         {queueHealth.online ? (
@@ -127,7 +159,7 @@ export default async function AdminPage() {
           </div>
         ) : (
           <Card>
-            <p className="text-sm text-red-700">Redis could not be reached, so queue metrics are unavailable.</p>
+            <p className="text-sm text-red-700">Redis could not be reached, so queue and worker metrics are unavailable.</p>
           </Card>
         )}
       </section>
