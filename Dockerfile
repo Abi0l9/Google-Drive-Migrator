@@ -34,3 +34,5 @@ ENV NODE_ENV=production
 COPY . .
 USER node
 CMD ["npm", "run", "worker"]
+
+FROM web AS production
