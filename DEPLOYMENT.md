@@ -30,6 +30,8 @@ Build the worker image:
 docker build --target worker -t gdm-worker .
 ```
 
+The repository commits an audited npm lockfile. CI and Docker both install dependencies with `npm ci`, so the exact dependency graph is reproduced instead of re-resolved on each build.
+
 ## Required environment
 
 Set these values on both web and worker unless noted otherwise:
@@ -120,7 +122,3 @@ In particular, current migrations can contain:
 - `transferLeaseUntil`
 
 Older code that does not understand these fields may lose pause/resume or crash-recovery behavior even though MongoDB retains the data.
-
-## Current deployment caveat
-
-The repository intentionally uses exact dependency pins and CI performs a production `npm audit`, but a freshly regenerated `package-lock.json` has not yet been restored to the branch. Until that is resolved, image/CI installs use `npm install` rather than deterministic `npm ci`.
