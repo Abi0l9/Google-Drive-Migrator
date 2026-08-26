@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "worker": "tsx worker.ts",
-    "test": "node tests/drive-url-parser.test.mjs"
+    "test": "tsx --test tests/*.test.ts tests/*.test.mjs"
   },
   "dependencies": {
     "bullmq": "5.79.0",
