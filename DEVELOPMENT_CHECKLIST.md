@@ -1,230 +1,264 @@
 # Google Drive Folder Migrator Development Checklist
 
-Use this checklist to track MVP readiness and future product work. Status legend:
+Status legend:
 
-- [x] Implemented in current scaffold
+- [x] Implemented
+- [~] Implemented but still needs production hardening or deeper tests
 - [ ] Not implemented yet
-- [~] Partially implemented; needs hardening, tests, or production integration
 
 ## 1. Project foundation
 
-- [x] Next.js App Router project structure
-- [x] React + TypeScript configuration
-- [x] Tailwind CSS configuration and global styles
-- [~] ShadCN-style reusable UI primitives
+- [x] Next.js App Router + React + TypeScript
+- [x] Tailwind CSS and reusable UI primitives
 - [x] Environment variable template
-- [x] README with local setup notes
-- [ ] Production deployment guide
-- [x] Docker Compose for local MongoDB + Redis + app + worker
-- [ ] CI workflow for install, lint, typecheck, tests, and build
+- [x] Docker Compose local stack with MongoDB and Redis healthchecks
+- [x] Multi-stage Dockerfile with `dev`, production web, and production worker targets
+- [x] Next.js standalone production output
+- [x] GitHub Actions CI for production dependency audit, tests, typecheck, lint, and build
+- [x] Production deployment guide
+- [ ] Restore a freshly generated audited `package-lock.json` and switch CI/images back to deterministic `npm ci`
 
-## 2. Homepage and folder analyzer UI
+## 2. Public folder analyzer
 
 - [x] Public Google Drive folder URL input
-- [x] Analyze Folder button
-- [x] Loading state during analysis
-- [x] Error display for invalid or inaccessible folders
-- [x] Analysis summary display for folder name, files, folders, and size
-- [ ] Persist analyzed folder state across navigation
-- [ ] Add URL examples and helper text
-- [ ] Add accessible form validation messages
-- [ ] Add responsive visual polish and empty states
+- [x] `/folders/:id` and `?id=` folder ID parsing
+- [x] Restrict source URLs to `drive.google.com`
+- [x] Validate that the source is a folder and publicly accessible
+- [x] Recursive nested-folder scan
+- [x] File/folder counts and total standard-file bytes
+- [x] Loading and error states
+- [~] Cooperative scan cancellation and pause checks
+- [ ] Persist analyzed state across navigation/reloads
+- [ ] Large-scan progress during analysis
+- [ ] Scan-result caching with expiry
+- [ ] Explicit shortcut/cycle handling
 
-## 3. Public folder validation and scanning
+## 3. Authentication and Google authorization
 
-- [x] Extract folder ID from `/folders/:id` URLs
-- [x] Extract folder ID from `?id=` URLs
-- [x] Validate URL shape before API processing
-- [x] Validate that the source is a Google Drive folder
-- [x] Return `Invalid Google Drive Folder URL` for invalid source URLs
-- [x] Return `Folder is not publicly accessible` for inaccessible source folders
-- [x] Recursively scan nested folders
-- [x] Count source files
-- [x] Count source folders
-- [x] Calculate total standard-file byte size
-- [ ] Add cycle/duplicate safeguards for Drive shortcuts or unusual parent graphs
-- [ ] Add scan cancellation
-- [ ] Add paginated scan progress for very large folders
-- [ ] Add scan result caching with expiration
+- [x] Auth.js Google provider
+- [x] Narrow OAuth scope: `openid email profile drive.file`
+- [x] Capture Google access and refresh tokens
+- [x] Encrypt tokens before MongoDB persistence
+- [x] Refresh expired Google access tokens automatically
+- [x] Keep provider access tokens out of the normal browser session
+- [x] Auth ownership checks on migration reads/actions
+- [x] Sign-in/sign-out UI
+- [~] Reauthentication UX when a refresh token is revoked or missing
+- [ ] Dedicated token-rotation/credential invalidation operations guide
 
-## 4. Authentication and authorization
+## 4. Destination selection
 
-- [x] Auth.js Google provider setup
-- [x] Required OAuth scopes configured: `openid`, `email`, `profile`, `drive.file`, `drive.metadata.readonly`
-- [x] JWT callback captures Google access and refresh tokens
-- [x] Session callback exposes access token for server use
-- [ ] Persist encrypted OAuth tokens in MongoDB
-- [ ] Refresh expired Google access tokens automatically
-- [ ] Restrict migration APIs to the authenticated owner
-- [ ] Add sign-in/sign-out UI controls
-- [ ] Add auth-required redirects for dashboard and migration flows
-- [ ] Add CSRF verification for mutating custom APIs beyond Auth.js defaults
+- [x] My Drive root option
+- [x] Existing folder URL/ID fallback
+- [x] Server-side destination folder validation
+- [x] Validate ability to add children
+- [x] Google Picker folder selection
+- [x] Picker support for Shared Drives
+- [x] Separate browser API key and Cloud project App ID configuration
+- [x] Picker bootstrap token delivered only on demand with `no-store`
+- [ ] Create-new-destination-folder control before migration
+- [ ] Remember recent destinations per user
 
-## 5. Destination selection flow
-
-- [ ] Root Drive destination option
-- [ ] Existing folder picker
-- [ ] Create new destination folder option
-- [ ] Validate destination folder write access
-- [ ] Preview destination path before migration starts
-- [ ] Remember recent destination folders per user
-
-## 6. Migration persistence
+## 5. Migration persistence and idempotency
 
 - [x] User model
-- [x] Migration model with status, source, destination, counters, byte totals, and timestamps
-- [x] Migration item model for files and folders
-- [x] Store source file/folder path per migration item
-- [x] Store destination IDs after creation/upload
-- [x] Store retry counts and failure reasons
-- [ ] Add model-level TypeScript interfaces
-- [ ] Add compound indexes for common queries
-- [ ] Add migration ownership checks on all reads/writes
-- [ ] Add retention/cleanup policy for completed migration records
+- [x] Migration model with source, destination, counters, bytes, status, timestamps
+- [x] Migration item model with path, status, retries, upload progress, destination IDs
+- [x] Unique migration/source-file item constraint
+- [x] Preserve destination root separately from selected destination parent
+- [x] Tag Drive-created files/folders with migration/source app properties
+- [x] Discover previously created destination items before creating duplicates
+- [x] Reuse scan records on rescan/retry
+- [x] Server-side deduplication of active source+destination migration creation
+- [x] Paused migrations count as active duplicates
+- [~] Transfer worker leases protect against overlapping resume/retry jobs and stale claims
+- [ ] Retention/cleanup policy for completed migration and item records
 
-## 7. Queue system
+## 6. Queue and worker system
 
-- [x] BullMQ Redis connection
+- [x] BullMQ + Redis connection
 - [x] Scan queue
 - [x] Transfer queue
-- [x] Retry queue placeholder
+- [x] Retry/resume queue
 - [x] Report queue
-- [x] Shared default attempts and exponential backoff
-- [x] Worker entrypoint script
-- [x] Scan worker registration
-- [x] Transfer worker registration
-- [x] Report worker registration
-- [ ] Dedicated retry worker implementation
-- [ ] Dead-letter queue or failed-job dashboard
-- [ ] Worker graceful shutdown handlers
-- [ ] Worker concurrency tuning per queue
-- [ ] Queue metrics and observability
+- [x] Exponential backoff and bounded attempts
+- [x] Scan worker
+- [x] Transfer worker
+- [x] Retry/resume sweep worker
+- [x] Report worker
+- [x] Graceful worker/queue/Redis shutdown on SIGTERM/SIGINT
+- [x] Atomic transfer-item claims
+- [x] Transfer leases with stale-job recovery
+- [~] Conservative transfer concurrency (currently 1 per worker process)
+- [x] Protected admin queue counters
+- [ ] Dedicated worker heartbeat/liveness record
+- [ ] Queue alerting/metrics export
+- [ ] Dead-letter management UI
 
-## 8. Folder recreation engine
+## 7. Folder recreation engine
 
-- [x] Create destination root folder
-- [x] Create destination subfolders recursively
-- [x] Store source-to-destination folder mappings in migration items
-- [x] Preserve nested source paths
-- [ ] Add collision strategy for duplicate destination names
-- [ ] Preserve folder metadata where supported
-- [ ] Handle Google Drive shortcuts explicitly
-- [ ] Add idempotency so resumed scans do not duplicate existing folders
+- [x] Create destination migration root
+- [x] Recreate nested folder structure recursively
+- [x] Preserve source paths
+- [x] Store source-to-destination mappings
+- [x] Retry-safe/idempotent folder creation through app-property markers
+- [x] Shared Drive-compatible Drive flags
+- [ ] Explicit duplicate-name/collision policy for pre-existing untagged destination content
+- [ ] Preserve supported folder metadata
+- [ ] Explicit Google Drive shortcut handling
 
-## 9. File transfer engine
+## 8. File transfer engine
 
-- [x] Stream standard Drive files from source to destination without saving to disk
-- [x] Export Google Docs as DOCX
-- [x] Export Google Sheets as XLSX
-- [x] Export Google Slides as PPTX
-- [x] Mark files as copying, completed, or failed
-- [x] Record destination file IDs
-- [x] Increment completed/failed counters
-- [x] Increment copied byte counters
-- [ ] Accurate per-file streaming byte progress callbacks
+- [x] Direct stream copy for standard small files without local disk persistence
+- [x] Google Docs → DOCX
+- [x] Google Sheets → XLSX
+- [x] Google Slides → PPTX
+- [x] Destination file ID persistence
+- [x] Per-item copying/completed/failed states
+- [x] Completed/failed byte and file accounting
+- [x] Large standard-file resumable uploads above 5 MB
+- [x] 8 MB resumable chunks
+- [x] Encrypted resumable session URL persistence
+- [x] Confirmed uploaded-byte persistence
+- [x] Resume from Google's accepted offset
+- [x] Recover expired resumable sessions
+- [x] Retry-safe destination lookup before re-upload
+- [~] Cooperative pause/cancel between resumable chunks
 - [ ] Transfer speed calculation
-- [ ] Estimated time remaining calculation
-- [ ] MIME type and extension normalization tests
-- [ ] Large-file resumable uploads
-- [ ] Backpressure tuning for stream stability
-- [ ] Idempotent retry that skips already-uploaded files
+- [ ] ETA calculation
+- [ ] Stream/backpressure soak tests for very large files
+- [ ] User-selectable Workspace export formats
 
-## 10. Progress tracking and reporting
+## 9. Progress, pause, resume, cancel, retry
 
-- [x] Migration progress API route
-- [x] Total files response
-- [x] Completed files response
-- [x] Failed files response
-- [x] Current file response based on copying item
-- [x] Percentage calculation
-- [x] Copied and total byte response
-- [~] Report worker finalizes completed/failed status
-- [ ] Live progress polling UI
-- [ ] WebSocket/SSE progress updates
-- [ ] Transfer speed response
-- [ ] ETA response
-- [ ] Completion report page
-- [ ] Downloadable migration report JSON/CSV
+- [x] Migration detail/progress page
+- [x] Polling progress UI
+- [x] Total/completed/failed files
+- [x] Overall processed percentage
+- [x] Total/copied bytes
+- [x] Current file and per-file resumable byte progress
+- [x] Detailed failed-file list with path, retry count, and error
+- [x] Retry only failed items
+- [x] Cancel pending/scanning/running/paused migrations
+- [x] Pause pending/scanning/running migrations
+- [x] Resume paused scans idempotently
+- [x] Resume paused transfer migrations through delayed retry sweep
+- [x] Preserve resumable upload state across pause/resume
+- [~] Small direct-stream uploads may finish before a pause/cancel can take effect
+- [ ] SSE/WebSocket progress instead of polling
+- [ ] Completion summary/report export (JSON/CSV)
 
-## 11. Error handling and resume behavior
+## 10. Google/API error handling
 
-- [x] Invalid URL error message
-- [x] Folder not public error message
-- [x] BullMQ automatic retry attempts configured
-- [x] Upload failure reason stored on migration item
-- [x] Continue migration accounting after item failures
-- [ ] Resume failed transfers from UI
-- [ ] Pause migration on network outage
-- [ ] Automatic resume after temporary Google/Redis/Mongo failure
-- [ ] Distinguish retryable vs permanent Google API failures
-- [ ] User-facing error taxonomy and troubleshooting text
+- [x] Invalid source URL errors
+- [x] Public-folder accessibility errors
+- [x] Destination accessibility/permission errors
+- [x] Store transfer failure messages
+- [x] Distinguish retryable vs permanent Google API errors
+- [x] Retry rate limits, 429, transient network failures, and Google 5xx failures
+- [x] Stop retrying ordinary permission/not-found/auth/invalid-request failures
+- [x] Use BullMQ `UnrecoverableError` for permanent failures
+- [x] Resumable-session 404/410 recovery
+- [ ] Rich user-facing troubleshooting taxonomy/actions for every common Google error reason
 
-## 12. Security and abuse prevention
+## 11. Security and abuse prevention
 
-- [x] Basic security headers middleware
-- [x] Analyzer API rate limiting
-- [~] Secure cookies handled by Auth.js when configured for production HTTPS
-- [ ] Enforce HTTPS in production deployments
-- [ ] Encrypt tokens at rest
-- [ ] Never log OAuth tokens or Drive file content
-- [ ] Add API rate limits for migration creation and progress routes
-- [ ] Add per-user migration quotas
-- [ ] Add request size limits and validation for all APIs
-- [ ] Add admin route authorization
+- [x] Basic security headers
+- [x] Analyzer rate limiting
+- [x] Migration creation rate limiting
+- [x] Picker-token bootstrap rate limiting
+- [x] Active migration request deduplication
+- [x] Encrypted Google credentials at rest
+- [x] Encrypted resumable-session URLs at rest
+- [x] No OAuth token in Auth.js browser session
+- [x] Admin email allowlist
+- [x] Admin route protection
+- [x] Picker browser token response uses no-store caching
+- [~] Auth.js secure cookie behavior relies on correctly configured production HTTPS/domain
+- [ ] Explicit per-user concurrent migration quota
+- [ ] Per-user data/usage quotas
+- [ ] Distributed rate limiting for multi-instance deployments (current limiter is process-local)
+- [ ] Content-Security-Policy tuned for Google Picker/Auth assets
 
-## 13. Dashboard and admin UX
+## 12. User dashboard
 
-- [x] Dashboard placeholder page
-- [x] Admin dashboard placeholder page
-- [ ] Migration creation wizard
-- [ ] Destination selection UI
-- [ ] Active migration list
-- [ ] Migration detail/progress page
-- [ ] Failed item list with retry actions
-- [ ] Admin metrics backed by database aggregation
-- [ ] Admin filters for active, failed, and completed migrations
-- [ ] Admin queue health view
+- [x] Authenticated recent migration history
+- [x] Links back to migration detail/progress
+- [x] Completed/failed file summary cards
+- [ ] Pagination beyond latest migrations
+- [ ] Filters by status/date
+- [ ] Search by source folder
+- [ ] Destination shortcut/open-in-Drive action
 
-## 14. Testing
+## 13. Admin and operations
 
-- [x] Typecheck script configured
-- [ ] Unit tests for folder URL parsing
-- [ ] Unit tests for rate limiter
-- [ ] Unit tests for Workspace export naming
-- [ ] Integration tests for analyze API with mocked Google Drive API
-- [ ] Integration tests for migration creation authorization
-- [ ] Worker tests with mocked MongoDB, Redis, and Google Drive clients
-- [ ] End-to-end test for analyze-to-migration happy path
-- [ ] Load test plan for folders with thousands of files
+- [x] Protected `/admin` route using `ADMIN_EMAILS`
+- [x] Total users
+- [x] Total migrations
+- [x] Active migrations including paused
+- [x] Failed migrations
+- [x] Total completed files
+- [x] Total copied bytes
+- [x] Scan/transfer/retry/report queue counts
+- [x] Redis availability state in admin UI
+- [x] Public dependency-aware `/api/health` endpoint
+- [x] Docker web healthcheck
+- [x] Mongo connection promise resets after failed startup connection
+- [ ] Worker heartbeat/health endpoint or record
+- [ ] Admin migration filters/details
+- [ ] Admin failed-job retry/removal operations
+- [ ] Operational alerting
 
-## 15. Documentation
+## 14. Testing and validation
 
-- [x] README overview and setup steps
-- [x] `.env.example` for required configuration
-- [x] Development checklist
-- [ ] OAuth app setup guide with screenshots
-- [ ] Google Drive API quota and permissions guide
-- [~] Worker deployment guide
-- [ ] Troubleshooting guide for common Google API errors
-- [ ] Security model documentation
-- [ ] Operational runbook for failed queues and retries
+- [x] Drive URL parser tests
+- [x] Google error-classification tests
+- [x] Resumable threshold tests
+- [x] Resumable Range-offset parser tests
+- [x] CI production dependency audit
+- [x] CI TypeScript check
+- [x] CI ESLint
+- [x] CI Next.js production build
+- [ ] Rate-limiter unit tests
+- [ ] Workspace export naming tests
+- [ ] Migration API integration tests with mocked Google APIs
+- [ ] Pause/resume/cancel API integration tests
+- [ ] Worker tests with isolated MongoDB/Redis/Drive clients
+- [ ] Docker image build smoke test in CI
+- [ ] End-to-end analyze → Picker → migration → completion test
+- [ ] Load/soak tests with thousands of files and multi-GB transfers
 
-## 16. Future roadmap
+## 15. Deployment and documentation
 
-- [ ] Authenticated source Drive support for Drive A → Drive B
+- [x] Current README
+- [x] `.env.example`
+- [x] Production deployment guide
+- [x] Google Picker/OAuth setup notes
+- [x] Web and worker container targets
+- [x] Health endpoint documentation
+- [x] Encryption-key consistency warning
+- [~] Queue/worker operations guidance
+- [ ] Screenshotted Google Cloud setup guide
+- [ ] Full troubleshooting guide
+- [ ] Backup/restore and disaster-recovery runbook
+
+## 16. Next hardening priorities
+
+- [ ] Restore audited `package-lock.json` and deterministic installs
+- [ ] Add distributed per-user quotas/rate limits
+- [ ] Add worker heartbeat and alerting
+- [ ] Add Worker/API integration tests
+- [ ] Add shortcut/cycle handling
+- [ ] Add downloadable completion report
+- [ ] Add transfer speed/ETA
+- [ ] Run large-folder and large-file soak tests
+
+## 17. Future product roadmap
+
+- [ ] Authenticated private source Drive / Drive A → Drive B
 - [ ] Multi-cloud destinations: Dropbox, OneDrive, Box
 - [ ] Scheduled migrations
 - [ ] ZIP download mode
-- [ ] User-selectable Google Workspace export formats
+- [ ] User-selectable Workspace export formats
 - [ ] Paid subscriptions and usage limits
 - [ ] Team collaboration features
-
-
-## 17. Local operations
-
-- [x] Dockerfile for app and worker containers
-- [x] Docker Compose services for app, worker, MongoDB, and Redis
-- [x] MongoDB healthcheck
-- [x] Redis healthcheck
-- [ ] Seed script for local demo data
-- [ ] One-command smoke test for Docker stack
