@@ -9,7 +9,11 @@ import {
   streamCopyFile,
   userDrive,
 } from "@/lib/google/drive";
-import { resumableCopyFile, shouldUseResumableUpload } from "@/lib/google/resumable-upload";
+import {
+  ResumableUploadCancelledError,
+  resumableCopyFile,
+  shouldUseResumableUpload,
+} from "@/lib/google/resumable-upload";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { createMigrationWorker, getReportQueue, getTransferQueue } from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
@@ -146,6 +150,16 @@ export function registerMigrationWorkers() {
     const migration = await Migration.findById(job.data.migrationId);
     if (!item || !migration) throw new Error("Migration item not found");
 
+    if (migration.status === "cancelled") {
+      if (item.status !== "completed") {
+        item.status = "skipped";
+        item.errorMessage = "Migration cancelled";
+        await item.save();
+      }
+      await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
+      return;
+    }
+
     if (item.status === "completed" && item.destinationFileId) {
       await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
       return;
@@ -215,6 +229,12 @@ export function registerMigrationWorkers() {
             item.uploadedBytes = uploadedBytes;
             await item.save();
           },
+          shouldContinue: async () => {
+            const latestMigration = await Migration.findById(migration._id)
+              .select("status")
+              .lean<{ status?: string }>();
+            return Boolean(latestMigration && latestMigration.status !== "cancelled");
+          },
         });
         destinationFileId = uploaded.id;
       } else {
@@ -242,6 +262,17 @@ export function registerMigrationWorkers() {
       );
       await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
     } catch (error) {
+      const latestMigration = await Migration.findById(migration._id)
+        .select("status")
+        .lean<{ status?: string }>();
+      if (error instanceof ResumableUploadCancelledError || latestMigration?.status === "cancelled") {
+        item.status = "skipped";
+        item.errorMessage = "Migration cancelled";
+        await item.save();
+        await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
+        return;
+      }
+
       const attemptsUsed = job.attemptsMade + 1;
       const attemptsAllowed = job.opts.attempts ?? 1;
       item.retryCount = attemptsUsed;

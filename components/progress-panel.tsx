@@ -13,6 +13,7 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   const [progress, setProgress] = useState<ProgressSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const loadProgress = useCallback(async () => {
     try {
@@ -44,6 +45,27 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
       window.clearInterval(interval);
     };
   }, [loadProgress]);
+
+  async function cancelMigration() {
+    setCancelling(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/migrations/${migrationId}/cancel`, { method: "POST" });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to cancel migration");
+        return;
+      }
+
+      await loadProgress();
+    } catch {
+      setError("Unable to cancel migration. Check your connection and try again.");
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   async function retryFailedFiles() {
     setRetrying(true);
@@ -96,6 +118,18 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
           <div className="h-full bg-blue-600" style={{ width: `${Math.min(progress.percentage, 100)}%` }} />
         </div>
       </Card>
+
+      {["pending", "scanning", "running"].includes(progress.status ?? "") ? (
+        <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-950">Need to stop this migration?</h3>
+            <p className="text-sm text-slate-600">Queued files stop immediately. A small file already streaming may finish first.</p>
+          </div>
+          <Button onClick={cancelMigration} disabled={cancelling}>
+            {cancelling ? "Cancelling..." : "Cancel migration"}
+          </Button>
+        </Card>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-3">
         <Card><p className="text-sm text-slate-500">Completed</p><strong className="text-3xl">{progress.completedFiles}</strong></Card>
