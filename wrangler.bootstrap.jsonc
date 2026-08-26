@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gdm-web",
+  "main": "cloudflare/bootstrap-worker.ts",
+  "compatibility_date": "2026-08-26",
+  "workers_dev": true,
+  "observability": {
+    "enabled": false
+  }
+}
