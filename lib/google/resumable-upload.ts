@@ -23,6 +23,14 @@ interface ResumableCopyOptions {
   sessionUrl?: string;
   onSession?: (sessionUrl: string) => Promise<void> | void;
   onProgress?: (uploadedBytes: number) => Promise<void> | void;
+  shouldContinue?: () => Promise<boolean> | boolean;
+}
+
+export class ResumableUploadCancelledError extends Error {
+  constructor() {
+    super("Migration cancelled");
+    this.name = "ResumableUploadCancelledError";
+  }
 }
 
 interface ResumableSessionStatus {
@@ -42,33 +50,43 @@ export async function resumableCopyFile(options: ResumableCopyOptions): Promise<
     throw new Error("Resumable upload requires a downloadable file with a known size");
   }
 
-  let sessionUrl = options.sessionUrl;
+  await assertUploadCanContinue(options);
+
+  let activeSessionUrl: string;
   let offset = 0;
 
-  if (sessionUrl) {
-    const status = await queryResumableSession(sessionUrl, totalSize);
+  if (options.sessionUrl) {
+    const status = await queryResumableSession(options.sessionUrl, totalSize);
     if (status.completedFile) return status.completedFile;
+
     if (status.expired) {
-      sessionUrl = undefined;
       await options.onProgress?.(0);
+      activeSessionUrl = await createResumableSession(
+        options.accessToken,
+        options.file,
+        options.parentId,
+        options.marker,
+        totalSize,
+      );
+      await options.onSession?.(activeSessionUrl);
     } else {
       offset = status.offset;
+      activeSessionUrl = options.sessionUrl;
       await options.onProgress?.(offset);
     }
-  }
-
-  if (!sessionUrl) {
-    sessionUrl = await createResumableSession(
+  } else {
+    activeSessionUrl = await createResumableSession(
       options.accessToken,
       options.file,
       options.parentId,
       options.marker,
       totalSize,
     );
-    await options.onSession?.(sessionUrl);
+    await options.onSession?.(activeSessionUrl);
   }
 
   while (offset < totalSize) {
+    await assertUploadCanContinue(options);
     const end = Math.min(offset + RESUMABLE_CHUNK_SIZE_BYTES, totalSize) - 1;
     const chunk = await downloadSourceRange(options.source, options.file.id, offset, end);
     const expectedLength = end - offset + 1;
@@ -77,7 +95,7 @@ export async function resumableCopyFile(options: ResumableCopyOptions): Promise<
       throw new Error(`Source partial download returned ${chunk.byteLength} bytes; expected ${expectedLength}`);
     }
 
-    const response = await fetch(sessionUrl, {
+    const response: Response = await fetch(activeSessionUrl, {
       method: "PUT",
       headers: {
         "Content-Length": String(chunk.byteLength),
@@ -87,10 +105,10 @@ export async function resumableCopyFile(options: ResumableCopyOptions): Promise<
       body: chunk,
     });
 
-    const rotatedSessionUrl = response.headers.get("location");
-    if (rotatedSessionUrl && rotatedSessionUrl !== sessionUrl) {
-      sessionUrl = rotatedSessionUrl;
-      await options.onSession?.(sessionUrl);
+    const rotatedSessionUrl: string | null = response.headers.get("location");
+    if (rotatedSessionUrl && rotatedSessionUrl !== activeSessionUrl) {
+      activeSessionUrl = rotatedSessionUrl;
+      await options.onSession?.(activeSessionUrl);
     }
 
     if (response.status === 308) {
@@ -103,7 +121,7 @@ export async function resumableCopyFile(options: ResumableCopyOptions): Promise<
     }
 
     if (response.status === 404 || response.status === 410) {
-      sessionUrl = await createResumableSession(
+      activeSessionUrl = await createResumableSession(
         options.accessToken,
         options.file,
         options.parentId,
@@ -111,7 +129,7 @@ export async function resumableCopyFile(options: ResumableCopyOptions): Promise<
         totalSize,
       );
       offset = 0;
-      await options.onSession?.(sessionUrl);
+      await options.onSession?.(activeSessionUrl);
       await options.onProgress?.(0);
       continue;
     }
@@ -126,6 +144,12 @@ export async function resumableCopyFile(options: ResumableCopyOptions): Promise<
   }
 
   throw new Error("Google Drive resumable upload ended without a completed file response");
+}
+
+async function assertUploadCanContinue(options: ResumableCopyOptions) {
+  if (!options.shouldContinue) return;
+  const shouldContinue = await options.shouldContinue();
+  if (!shouldContinue) throw new ResumableUploadCancelledError();
 }
 
 async function createResumableSession(
