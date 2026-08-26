@@ -2,15 +2,29 @@ import { loadEnvConfig } from "@next/env";
 
 loadEnvConfig(process.cwd());
 
+const HEARTBEAT_INTERVAL_MS = 10_000;
+
 async function main() {
   const { registerMigrationWorkers } = await import("@/lib/workers/migration-workers");
-  const { closeMigrationQueueResources } = await import("@/lib/queue/migrations");
+  const {
+    closeMigrationQueueResources,
+    touchMigrationWorkerHeartbeat,
+  } = await import("@/lib/queue/migrations");
+
   const workers = registerMigrationWorkers();
   let shuttingDown = false;
+
+  await touchMigrationWorkerHeartbeat();
+  const heartbeatTimer = setInterval(() => {
+    void touchMigrationWorkerHeartbeat().catch((error) => {
+      console.error("Failed to refresh migration worker heartbeat", error);
+    });
+  }, HEARTBEAT_INTERVAL_MS);
 
   async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
+    clearInterval(heartbeatTimer);
     console.log(`Received ${signal}; closing migration workers...`);
 
     const results = await Promise.allSettled(workers.map((worker) => worker.close()));
