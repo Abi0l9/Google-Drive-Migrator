@@ -25,6 +25,7 @@ const PERMANENT_APPLICATION_CODES = new Set([
 interface ErrorLike {
   code?: unknown;
   status?: unknown;
+  reason?: unknown;
   message?: unknown;
   response?: {
     status?: unknown;
@@ -66,7 +67,7 @@ export function googleDriveErrorDetails(error: unknown) {
   const candidate = isRecord(error) ? error as ErrorLike : undefined;
   const response = candidate?.response;
   const status = numberValue(response?.status) ?? numberValue(candidate?.status) ?? statusFromMessage(candidate?.message);
-  const reason = reasonFromPayload(response?.data);
+  const reason = typeof candidate?.reason === "string" ? candidate.reason : reasonFromPayload(response?.data);
   const networkCode = typeof candidate?.code === "string" ? candidate.code : undefined;
   const message = typeof candidate?.message === "string" ? candidate.message : "Google Drive request failed";
 
