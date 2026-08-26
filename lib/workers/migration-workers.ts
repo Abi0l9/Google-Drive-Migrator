@@ -44,6 +44,8 @@ interface ClosableWorker {
   close(): Promise<void>;
 }
 
+const TRANSFER_LEASE_MS = 10 * 60 * 1000;
+
 class MigrationCancelledError extends Error {
   constructor() {
     super("Migration cancelled");
@@ -56,6 +58,15 @@ class MigrationPausedError extends Error {
     super("Migration paused");
     this.name = "MigrationPausedError";
   }
+}
+
+function nextTransferLease() {
+  return new Date(Date.now() + TRANSFER_LEASE_MS);
+}
+
+function clearTransferLease(item: { transferJobId?: string; transferLeaseUntil?: Date }) {
+  item.transferJobId = undefined;
+  item.transferLeaseUntil = undefined;
 }
 
 export function registerMigrationWorkers() {
@@ -200,6 +211,7 @@ export function registerMigrationWorkers() {
   }));
 
   workers.push(createMigrationWorker<TransferJobData>("transfer", async (job: {
+    id?: string;
     data: TransferJobData;
     attemptsMade: number;
     opts: { attempts?: number };
@@ -211,12 +223,22 @@ export function registerMigrationWorkers() {
     const currentItem = await MigrationItem.findById(job.data.itemId);
     if (!currentItem) throw new Error("Migration item not found");
 
-    if (migration.status === "paused") return;
+    const transferJobId = String(job.id ?? `${job.data.migrationId}-${job.data.itemId}-${job.attemptsMade}`);
+
+    if (migration.status === "paused") {
+      if (currentItem.status === "copying" && currentItem.transferJobId === transferJobId) {
+        currentItem.status = "pending";
+        clearTransferLease(currentItem);
+        await currentItem.save();
+      }
+      return;
+    }
 
     if (migration.status === "cancelled") {
       if (currentItem.status !== "completed") {
         currentItem.status = "skipped";
         currentItem.errorMessage = "Migration cancelled";
+        clearTransferLease(currentItem);
         await currentItem.save();
       }
       await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
@@ -228,10 +250,29 @@ export function registerMigrationWorkers() {
       return;
     }
 
+    const now = new Date();
+    const staleWithoutLease = new Date(Date.now() - TRANSFER_LEASE_MS);
     const item = await MigrationItem.findOneAndUpdate(
-      { _id: job.data.itemId, status: "pending" },
       {
-        $set: { status: "copying", retryCount: job.attemptsMade },
+        _id: job.data.itemId,
+        $or: [
+          { status: "pending" },
+          { status: "copying", transferJobId },
+          { status: "copying", transferLeaseUntil: { $lt: now } },
+          {
+            status: "copying",
+            transferLeaseUntil: { $exists: false },
+            updatedAt: { $lt: staleWithoutLease },
+          },
+        ],
+      },
+      {
+        $set: {
+          status: "copying",
+          retryCount: job.attemptsMade,
+          transferJobId,
+          transferLeaseUntil: nextTransferLease(),
+        },
         $unset: { errorMessage: "" },
       },
       { new: true },
@@ -239,11 +280,11 @@ export function registerMigrationWorkers() {
 
     if (!item) return;
 
-    const user = await User.findById(migration.userId);
-    if (!user) throw new Error("Migration owner not found");
-    const accessToken = await getFreshGoogleAccessToken(user);
-
     try {
+      const user = await User.findById(migration.userId);
+      if (!user) throw new Error("Migration owner not found");
+      const accessToken = await getFreshGoogleAccessToken(user);
+
       const sourceDrive = publicDrive();
       const destinationDrive = userDrive(accessToken);
       const marker = { migrationId: migration._id.toString(), sourceId: item.sourceFileId };
@@ -258,6 +299,7 @@ export function registerMigrationWorkers() {
         item.status = "completed";
         item.uploadedBytes = item.size;
         item.encryptedUploadSessionUrl = undefined;
+        clearTransferLease(item);
         await item.save();
         await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
         return;
@@ -279,6 +321,7 @@ export function registerMigrationWorkers() {
           } catch {
             item.encryptedUploadSessionUrl = undefined;
             item.uploadedBytes = 0;
+            item.transferLeaseUntil = nextTransferLease();
             await item.save();
           }
         }
@@ -292,10 +335,12 @@ export function registerMigrationWorkers() {
           sessionUrl,
           onSession: async (nextSessionUrl) => {
             item.encryptedUploadSessionUrl = encryptToken(nextSessionUrl);
+            item.transferLeaseUntil = nextTransferLease();
             await item.save();
           },
           onProgress: async (uploadedBytes) => {
             item.uploadedBytes = uploadedBytes;
+            item.transferLeaseUntil = nextTransferLease();
             await item.save();
           },
           shouldContinue: async () => {
@@ -327,6 +372,7 @@ export function registerMigrationWorkers() {
       item.status = "completed";
       item.uploadedBytes = item.size;
       item.encryptedUploadSessionUrl = undefined;
+      clearTransferLease(item);
       await item.save();
 
       await Migration.updateOne(
@@ -342,6 +388,7 @@ export function registerMigrationWorkers() {
       if (latestMigration?.status === "paused") {
         item.status = "pending";
         item.errorMessage = undefined;
+        clearTransferLease(item);
         await item.save();
         return;
       }
@@ -349,6 +396,7 @@ export function registerMigrationWorkers() {
       if (latestMigration?.status === "cancelled") {
         item.status = "skipped";
         item.errorMessage = "Migration cancelled";
+        clearTransferLease(item);
         await item.save();
         await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
         return;
@@ -357,6 +405,7 @@ export function registerMigrationWorkers() {
       if (error instanceof ResumableUploadCancelledError) {
         item.status = "pending";
         item.errorMessage = undefined;
+        clearTransferLease(item);
         await item.save();
         await getTransferQueue().add(
           "resume-transfer-file",
@@ -374,6 +423,7 @@ export function registerMigrationWorkers() {
       item.retryCount = attemptsUsed;
       item.errorMessage = details.message;
       item.status = finalFailure ? "failed" : "pending";
+      clearTransferLease(item);
       await item.save();
 
       if (item.status === "failed") {
