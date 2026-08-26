@@ -7,7 +7,10 @@ declare global {
 
 export function connectDb() {
   if (!global.mongooseConnection) {
-    global.mongooseConnection = mongoose.connect(env.mongoUri);
+    global.mongooseConnection = mongoose.connect(env.mongoUri).catch((error) => {
+      global.mongooseConnection = undefined;
+      throw error;
+    });
   }
   return global.mongooseConnection;
 }
