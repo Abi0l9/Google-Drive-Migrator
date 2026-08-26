@@ -7,9 +7,11 @@ assert.ok(match, "extractDriveFolderId function should exist");
 
 const jsFunction = match[0]
   .replace("export function", "function")
-  .replace("folderUrl: string", "folderUrl");
+  .replace("folderUrl: string", "folderUrl")
+  .replace("let url: URL;", "let url;");
 const extractDriveFolderId = new Function(`${jsFunction}; return extractDriveFolderId;`)();
 
 assert.equal(extractDriveFolderId("https://drive.google.com/drive/folders/abc_123-XYZ"), "abc_123-XYZ");
 assert.equal(extractDriveFolderId("https://drive.google.com/open?id=folder123"), "folder123");
+assert.throws(() => extractDriveFolderId("https://example.com/drive/folders/folder123"), /Invalid Google Drive Folder URL/);
 assert.throws(() => extractDriveFolderId("https://example.com/not-drive"), /Invalid Google Drive Folder URL/);

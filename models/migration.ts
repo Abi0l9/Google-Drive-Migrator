@@ -8,6 +8,7 @@ const MigrationSchema = new Schema(
     sourceFolderName: { type: String, required: true },
     destinationFolderId: { type: String, required: true },
     destinationFolderName: { type: String, required: true },
+    destinationRootFolderId: String,
     status: { type: String, enum: ["pending", "scanning", "running", "completed", "failed", "cancelled"], default: "pending" },
     totalFiles: { type: Number, default: 0 },
     completedFiles: { type: Number, default: 0 },

@@ -4,4 +4,5 @@ node_modules
 .env
 tsconfig.tsbuildinfo
 npm-debug.log*
+*.log
 .DS_Store

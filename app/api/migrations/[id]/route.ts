@@ -40,11 +40,15 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
   const current = await MigrationItem.findOne({ migrationId: id, status: "copying" }).lean<CurrentMigrationItemRecord>();
   const totalFiles = migration.totalFiles || 0;
-  const percentage = totalFiles ? Number((((migration.completedFiles || 0) / totalFiles) * 100).toFixed(1)) : 0;
+  const completedFiles = migration.completedFiles || 0;
+  const failedFiles = migration.failedFiles || 0;
+  const processedFiles = completedFiles + failedFiles;
+  const percentage = totalFiles ? Number(((processedFiles / totalFiles) * 100).toFixed(1)) : 0;
+
   return NextResponse.json({
     totalFiles,
-    completedFiles: migration.completedFiles || 0,
-    failedFiles: migration.failedFiles || 0,
+    completedFiles,
+    failedFiles,
     currentFile: current?.sourceName,
     percentage,
     status: migration.status,

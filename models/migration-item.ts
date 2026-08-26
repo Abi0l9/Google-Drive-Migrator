@@ -18,4 +18,6 @@ const MigrationItemSchema = new Schema(
   { timestamps: true },
 );
 
+MigrationItemSchema.index({ migrationId: 1, sourceFileId: 1 }, { unique: true });
+
 export const MigrationItem = models.MigrationItem ?? model("MigrationItem", MigrationItemSchema);

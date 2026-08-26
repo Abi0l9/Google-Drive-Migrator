@@ -14,8 +14,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
   const [url, setUrl] = useState("");
   const [analysis, setAnalysis] = useState<FolderAnalysis | null>(null);
   const [destinationMode, setDestinationMode] = useState<"root" | "folder">("root");
-  const [destinationFolderId, setDestinationFolderId] = useState("");
-  const [destinationFolderName, setDestinationFolderName] = useState("");
+  const [destinationFolderRef, setDestinationFolderRef] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -24,18 +23,24 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
     setLoading(true);
     setError(null);
     setAnalysis(null);
-    const response = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderUrl: url }),
-    });
-    const payload = await response.json();
-    setLoading(false);
-    if (!response.ok) {
-      setError(payload.error ?? "Unable to analyze folder");
-      return;
+
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderUrl: url }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to analyze folder");
+        return;
+      }
+      setAnalysis(payload);
+    } catch {
+      setError("Unable to reach Drive Migrator. Check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
-    setAnalysis(payload);
   }
 
   async function startMigration() {
@@ -44,28 +49,30 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
     setCreating(true);
     setError(null);
 
-    const destinationId = destinationMode === "root" ? "root" : destinationFolderId.trim();
-    const destinationName = destinationMode === "root" ? "My Drive" : destinationFolderName.trim();
-    const response = await fetch("/api/migrations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sourceFolderId: analysis.folderId,
-        sourceFolderUrl: url,
-        sourceFolderName: analysis.folderName,
-        destinationFolderId: destinationId,
-        destinationFolderName: destinationName,
-      }),
-    });
-    const payload = await response.json();
-    setCreating(false);
+    try {
+      const response = await fetch("/api/migrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceFolderId: analysis.folderId,
+          sourceFolderUrl: url,
+          sourceFolderName: analysis.folderName,
+          destinationFolderRef: destinationMode === "root" ? "root" : destinationFolderRef.trim(),
+        }),
+      });
+      const payload = await response.json();
 
-    if (!response.ok) {
-      setError(payload.error ?? "Unable to start migration");
-      return;
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to start migration");
+        return;
+      }
+
+      window.location.href = `/migrations/${payload.migrationId}`;
+    } catch {
+      setError("Unable to start the migration. Check your connection and try again.");
+    } finally {
+      setCreating(false);
     }
-
-    window.location.href = `/migrations/${payload.migrationId}`;
   }
 
   return (
@@ -80,8 +87,11 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
           className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
         />
       </div>
-      <Button onClick={analyze} disabled={loading || !url}>{loading ? "Analyzing..." : "Analyze Folder"}</Button>
+
+      <Button onClick={analyze} disabled={loading || !url.trim()}>{loading ? "Analyzing..." : "Analyze Folder"}</Button>
+
       {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+
       {analysis ? (
         <div className="space-y-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
           <div>
@@ -109,36 +119,31 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
                 checked={destinationMode === "folder"}
                 onChange={() => setDestinationMode("folder")}
               />
-              Existing Drive folder ID
+              Existing Drive folder
             </label>
+
             {destinationMode === "folder" ? (
-              <div className="grid gap-3">
+              <div className="space-y-2">
                 <input
-                  value={destinationFolderId}
-                  onChange={(event) => setDestinationFolderId(event.target.value)}
-                  placeholder="Destination folder ID"
+                  value={destinationFolderRef}
+                  onChange={(event) => setDestinationFolderRef(event.target.value)}
+                  placeholder="Paste destination folder URL or ID"
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
                 />
-                <input
-                  value={destinationFolderName}
-                  onChange={(event) => setDestinationFolderName(event.target.value)}
-                  placeholder="Destination folder name"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-                />
+                <p className="text-xs leading-5 text-slate-500">
+                  Drive Migrator validates write access before creating the migration.
+                </p>
               </div>
             ) : null}
           </fieldset>
 
           <Button
             onClick={startMigration}
-            disabled={
-              creating ||
-              !isAuthenticated ||
-              (destinationMode === "folder" && (!destinationFolderId.trim() || !destinationFolderName.trim()))
-            }
+            disabled={creating || !isAuthenticated || (destinationMode === "folder" && !destinationFolderRef.trim())}
           >
             {creating ? "Starting..." : "Start Migration"}
           </Button>
+
           {!authConfigured ? <p className="text-sm text-red-700">Set a real Google OAuth client ID and secret before starting a migration.</p> : null}
           {authConfigured && !isAuthenticated ? <p className="text-sm text-slate-600">Sign in with Google before starting a migration.</p> : null}
         </div>

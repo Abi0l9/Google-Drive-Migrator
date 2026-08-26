@@ -8,6 +8,7 @@ const UserSchema = new Schema(
     googleId: { type: String, required: true, index: true },
     accessToken: { type: String, required: true },
     refreshToken: { type: String, required: true },
+    accessTokenExpiresAt: Date,
   },
   { timestamps: true },
 );
