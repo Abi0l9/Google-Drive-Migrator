@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../lib/google/drive.ts", import.meta.url), "utf8");
-const match = source.match(/export function extractDriveFolderId[\s\S]*?\n}\n/);
+const match = source.match(/export function extractDriveFolderId\([^)]*\)\s*(?::\s*[^{]+)?\s*\{[\s\S]*?\n\}/);
 assert.ok(match, "extractDriveFolderId function should exist");
 
 const jsFunction = match[0]

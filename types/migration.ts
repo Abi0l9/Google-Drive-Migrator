@@ -16,4 +16,7 @@ export interface ProgressSnapshot {
   failedFiles: number;
   currentFile?: string;
   percentage: number;
+  status?: MigrationStatus;
+  copiedBytes?: number;
+  totalBytes?: number;
 }

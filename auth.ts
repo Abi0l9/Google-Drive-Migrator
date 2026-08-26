@@ -39,9 +39,7 @@ export const { handlers: { GET, POST }, auth, signIn, signOut } = NextAuth({
                 accessToken: encryptToken(account.access_token),
                 ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
               },
-              $setOnInsert: {
-                refreshToken: encryptedRefreshToken ?? "",
-              },
+              ...(!encryptedRefreshToken ? { $setOnInsert: { refreshToken: "" } } : {}),
             },
             { upsert: true, new: true },
           );

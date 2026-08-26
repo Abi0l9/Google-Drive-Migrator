@@ -1,6 +1,9 @@
 import { FolderOpen, Gauge, RefreshCcw, ShieldCheck } from "lucide-react";
+import { auth } from "@/auth";
 import { AnalyzerForm } from "@/components/analyzer-form";
+import { SignInButton, SignOutButton } from "@/components/auth-actions";
 import { Card } from "@/components/ui";
+import { isGoogleOAuthConfigured } from "@/lib/env";
 
 const features = [
   { icon: FolderOpen, title: "Recursive scans", copy: "Analyze every public subfolder and file before a migration starts." },
@@ -9,9 +12,20 @@ const features = [
   { icon: ShieldCheck, title: "Secure OAuth", copy: "Users authenticate with Google; source folders remain untouched." },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const session = await auth();
+  const googleOAuthConfigured = isGoogleOAuthConfigured();
+
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-6 py-12">
+      <header className="flex items-center justify-between gap-4">
+        <p className="font-semibold text-slate-950">Drive Migrator</p>
+        <div className="flex items-center gap-3">
+          {session?.user?.email ? <p className="hidden text-sm text-slate-600 sm:block">{session.user.email}</p> : null}
+          {session?.user?.email ? <SignOutButton /> : <SignInButton disabled={!googleOAuthConfigured} />}
+        </div>
+      </header>
+
       <section className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
         <div className="space-y-6">
           <p className="font-semibold uppercase tracking-[0.3em] text-blue-600">Google Drive Folder Migrator</p>
@@ -23,7 +37,7 @@ export default function Home() {
             choose a destination, and let the migration queue recreate the folder tree and stream files for you.
           </p>
         </div>
-        <AnalyzerForm />
+        <AnalyzerForm isAuthenticated={Boolean(session?.user?.email)} authConfigured={googleOAuthConfigured} />
       </section>
 
       <section className="grid gap-4 md:grid-cols-4">

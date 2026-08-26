@@ -46,7 +46,7 @@ async function scanFolderStats(drive: drive_v3.Drive, folderId: string): Promise
   do {
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
-      fields: "nextPageToken, files(id, name, mimeType, size)",
+      fields: "nextPageToken, files(id, name, mimeType, size, quotaBytesUsed)",
       pageSize: 1000,
       pageToken,
     });
@@ -59,7 +59,7 @@ async function scanFolderStats(drive: drive_v3.Drive, folderId: string): Promise
         size += child.size;
       } else {
         files += 1;
-        size += Number(file.size ?? 0);
+        size += Number(file.size ?? file.quotaBytesUsed ?? 0);
       }
     }
     pageToken = response.data.nextPageToken ?? undefined;

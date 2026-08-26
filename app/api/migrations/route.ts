@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
-import { scanQueue } from "@/lib/queue/migrations";
+import { getScanQueue } from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
 import { User } from "@/models/user";
 
@@ -23,6 +23,13 @@ export async function POST(request: Request) {
   const user = await User.findOne({ email: session.user.email });
   if (!user?.accessToken) return NextResponse.json({ error: "Google Drive authorization required" }, { status: 403 });
   const migration = await Migration.create({ ...parsed.data, userId: user._id, status: "pending" });
-  await scanQueue.add("scan-folder", { migrationId: migration._id.toString() });
+  try {
+    await getScanQueue().add("scan-folder", { migrationId: migration._id.toString() });
+  } catch (error) {
+    migration.status = "failed";
+    migration.errorMessage = error instanceof Error ? error.message : "Redis queue unavailable";
+    await migration.save();
+    return NextResponse.json({ error: "Redis is not available. Start Redis before creating migrations." }, { status: 503 });
+  }
   return NextResponse.json({ migrationId: migration._id.toString(), status: migration.status }, { status: 201 });
 }

@@ -2,7 +2,7 @@ import { drive_v3 } from "googleapis";
 import { decryptToken } from "@/lib/crypto";
 import { connectDb } from "@/lib/db";
 import { FOLDER_MIME_TYPE, createDestinationFolder, publicDrive, streamCopyFile, userDrive } from "@/lib/google/drive";
-import { createMigrationWorker, reportQueue, transferQueue } from "@/lib/queue/migrations";
+import { createMigrationWorker, getReportQueue, getTransferQueue } from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
 import { MigrationItem } from "@/models/migration-item";
 import { User } from "@/models/user";
@@ -14,11 +14,6 @@ interface ScanJobData {
 interface TransferJobData {
   migrationId: string;
   itemId: string;
-}
-
-interface FolderMapping {
-  sourceFolderId: string;
-  destinationFolderId: string;
 }
 
 export function registerMigrationWorkers() {
@@ -50,10 +45,10 @@ export function registerMigrationWorkers() {
     await migration.save();
 
     const pendingFiles = await MigrationItem.find({ migrationId: migration._id, itemType: "file", status: "pending" }).select("_id");
-    await transferQueue.addBulk(pendingFiles.map((item: { _id: { toString(): string } }) => ({ name: "transfer-file", data: { migrationId: migration._id.toString(), itemId: item._id.toString() } })));
+    await getTransferQueue().addBulk(pendingFiles.map((item: { _id: { toString(): string } }) => ({ name: "transfer-file", data: { migrationId: migration._id.toString(), itemId: item._id.toString() } })));
   });
 
-  createMigrationWorker<TransferJobData>("transfer", async (job: { data: TransferJobData; attemptsMade: number }) => {
+  createMigrationWorker<TransferJobData>("transfer", async (job: { data: TransferJobData; attemptsMade: number; opts: { attempts?: number } }) => {
     await connectDb();
     const item = await MigrationItem.findById(job.data.itemId);
     const migration = await Migration.findById(job.data.migrationId);
@@ -75,17 +70,21 @@ export function registerMigrationWorkers() {
       item.status = "completed";
       await item.save();
       await Migration.updateOne({ _id: migration._id }, { $inc: { completedFiles: 1, copiedBytes: item.size } });
-      await reportQueue.add("refresh-report", { migrationId: migration._id.toString() });
+      await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
     } catch (error) {
-      item.status = "failed";
-      item.retryCount = job.attemptsMade + 1;
+      const attemptsUsed = job.attemptsMade + 1;
+      const attemptsAllowed = job.opts.attempts ?? 1;
+      item.retryCount = attemptsUsed;
       item.errorMessage = error instanceof Error ? error.message : "Unknown upload failure";
+      item.status = attemptsUsed >= attemptsAllowed ? "failed" : "pending";
       await item.save();
-      await Migration.updateOne({ _id: migration._id }, { $inc: { failedFiles: 1 } });
-      await reportQueue.add("refresh-report", { migrationId: migration._id.toString() });
+      if (item.status === "failed") {
+        await Migration.updateOne({ _id: migration._id }, { $inc: { failedFiles: 1 } });
+        await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
+      }
       throw error;
     }
-  });
+  }, 1);
 
   createMigrationWorker<ScanJobData>("report", async (job: { data: ScanJobData }) => {
     await connectDb();
@@ -96,7 +95,7 @@ export function registerMigrationWorkers() {
       migration.completedAt = new Date();
       await migration.save();
     }
-  });
+  }, 1);
 }
 
 async function scanFolder(
@@ -113,7 +112,7 @@ async function scanFolder(
   do {
     const response = await drive.files.list({
       q: `'${sourceFolderId}' in parents and trashed = false`,
-      fields: "nextPageToken, files(id,name,mimeType,size)",
+      fields: "nextPageToken, files(id,name,mimeType,size,quotaBytesUsed)",
       pageSize: 1000,
       pageToken,
     });
@@ -140,7 +139,7 @@ async function scanFolder(
         files += nested.files;
         bytes += nested.bytes;
       } else {
-        const size = Number(file.size ?? 0);
+        const size = Number(file.size ?? file.quotaBytesUsed ?? 0);
         await MigrationItem.create({
           migrationId,
           sourceFileId: file.id,
@@ -157,6 +156,6 @@ async function scanFolder(
     }
     pageToken = response.data.nextPageToken ?? undefined;
   } while (pageToken);
-  await reportQueue.add("refresh-report", { migrationId });
+  await getReportQueue().add("refresh-report", { migrationId });
   return { files, bytes };
 }
