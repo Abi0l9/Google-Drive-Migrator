@@ -32,12 +32,15 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   }, [migrationId]);
 
   useEffect(() => {
-    void loadProgress();
+    const initialLoad = window.setTimeout(() => {
+      void loadProgress();
+    }, 0);
     const interval = window.setInterval(() => {
       void loadProgress();
     }, 3000);
 
     return () => {
+      window.clearTimeout(initialLoad);
       window.clearInterval(interval);
     };
   }, [loadProgress]);
