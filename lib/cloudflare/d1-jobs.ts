@@ -51,23 +51,29 @@ export function continueFolderScan(db: D1Database, itemId: string) {
   `).bind(itemId).run();
 }
 
-export function addMigrationScanTotals(
-  db: D1Database,
-  migrationId: string,
-  discoveredFiles: number,
-  discoveredBytes: number,
-) {
-  return db.prepare(`
-    UPDATE migrations
-    SET total_files = total_files + ?,
-        total_bytes = total_bytes + ?,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).bind(
-    Math.max(0, Math.floor(discoveredFiles)),
-    Math.max(0, Math.floor(discoveredBytes)),
-    migrationId,
-  ).run();
+export async function listPendingFolderItems(db: D1Database, migrationId: string, limit = 40, afterId = "") {
+  const result = await db.prepare(`
+    SELECT
+      id,
+      source_file_id AS sourceFileId,
+      source_name AS sourceName,
+      source_path AS sourcePath,
+      destination_folder_id AS destinationFolderId
+    FROM migration_items
+    WHERE migration_id = ?
+      AND item_type = 'folder'
+      AND status = 'pending'
+      AND id > ?
+    ORDER BY id ASC
+    LIMIT ?
+  `).bind(migrationId, afterId, Math.min(80, Math.max(1, Math.floor(limit)))).all<{
+    id: string;
+    sourceFileId: string;
+    sourceName: string;
+    sourcePath: string;
+    destinationFolderId: string;
+  }>();
+  return result.results;
 }
 
 export function markScanCompleteIfNoFoldersRemain(db: D1Database, migrationId: string) {
@@ -75,6 +81,14 @@ export function markScanCompleteIfNoFoldersRemain(db: D1Database, migrationId: s
     UPDATE migrations
     SET scan_completed = 1,
         pending_scan_jobs = 0,
+        total_files = (
+          SELECT COUNT(*) FROM migration_items
+          WHERE migration_id = ? AND item_type = 'file'
+        ),
+        total_bytes = COALESCE((
+          SELECT SUM(size) FROM migration_items
+          WHERE migration_id = ? AND item_type = 'file'
+        ), 0),
         status = CASE WHEN status = 'scanning' THEN 'running' ELSE status END,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
@@ -108,5 +122,5 @@ export function markScanCompleteIfNoFoldersRemain(db: D1Database, migrationId: s
       completed_at AS completedAt,
       created_at AS createdAt,
       updated_at AS updatedAt
-  `).bind(migrationId, migrationId).first<GdmMigration>();
+  `).bind(migrationId, migrationId, migrationId, migrationId).first<GdmMigration>();
 }
