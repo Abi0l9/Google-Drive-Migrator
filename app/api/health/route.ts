@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDb } from "@/lib/db";
-import { getScanQueue } from "@/lib/queue/migrations";
+import { getMigrationWorkerHeartbeat, getScanQueue } from "@/lib/queue/migrations";
 
 export const dynamic = "force-dynamic";
 
@@ -9,23 +9,29 @@ const noStoreHeaders = {
 };
 
 export async function GET() {
-  const [database, redis] = await Promise.allSettled([
+  const [database, redis, workerHeartbeat] = await Promise.allSettled([
     connectDb(),
     getScanQueue().getJobCounts("waiting"),
+    getMigrationWorkerHeartbeat(),
   ]);
 
   const databaseOk = database.status === "fulfilled";
   const redisOk = redis.status === "fulfilled";
-  const healthy = databaseOk && redisOk;
+  const workerHeartbeatAt = workerHeartbeat.status === "fulfilled" ? workerHeartbeat.value : null;
+  const workerOk = Boolean(workerHeartbeatAt);
+  const webReady = databaseOk && redisOk;
+  const fullyOperational = webReady && workerOk;
 
   return NextResponse.json(
     {
-      status: healthy ? "ok" : "degraded",
+      status: fullyOperational ? "ok" : webReady ? "degraded" : "unavailable",
       database: databaseOk ? "ok" : "unavailable",
       queue: redisOk ? "ok" : "unavailable",
+      worker: workerOk ? "ok" : "unavailable",
+      workerHeartbeatAt,
     },
     {
-      status: healthy ? 200 : 503,
+      status: webReady ? 200 : 503,
       headers: noStoreHeaders,
     },
   );
