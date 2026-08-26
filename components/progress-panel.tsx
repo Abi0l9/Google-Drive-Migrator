@@ -1,12 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
+import {
+  updateTransferMetrics,
+  type TransferSample,
+} from "@/lib/migration/progress-metrics";
 import type { ProgressSnapshot } from "@/types/migration";
 
 interface ProgressPanelProps {
   migrationId: string;
+}
+
+function formatEta(seconds?: number) {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return null;
+  const rounded = Math.ceil(seconds);
+  if (rounded < 60) return `${rounded}s`;
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+  if (minutes < 60) return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 export function ProgressPanel({ migrationId }: ProgressPanelProps) {
@@ -16,17 +32,24 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   const [cancelling, setCancelling] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [transferRate, setTransferRate] = useState<number | undefined>();
+  const [etaSeconds, setEtaSeconds] = useState<number | undefined>();
+  const transferSampleRef = useRef<TransferSample>();
 
   const loadProgress = useCallback(async () => {
     try {
       const response = await fetch(`/api/migrations/${migrationId}`);
-      const payload = await response.json();
+      const payload = await response.json() as ProgressSnapshot & { error?: string };
 
       if (!response.ok) {
         setError(payload.error ?? "Unable to load migration progress");
         return;
       }
 
+      const metrics = updateTransferMetrics(transferSampleRef.current, payload);
+      transferSampleRef.current = metrics.sample;
+      setTransferRate(metrics.rateBytesPerSecond);
+      setEtaSeconds(metrics.etaSeconds);
       setError(null);
       setProgress(payload);
     } catch {
@@ -120,6 +143,7 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
     ? Math.min(100, Math.round(((progress.currentFileUploadedBytes ?? 0) / currentFileTotalBytes) * 100))
     : 0;
   const active = ["pending", "scanning", "running"].includes(progress.status ?? "");
+  const etaLabel = formatEta(etaSeconds);
 
   return (
     <div className="space-y-5">
@@ -140,6 +164,22 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
         <div className="h-3 overflow-hidden rounded-full bg-slate-100">
           <div className="h-full bg-blue-600" style={{ width: `${Math.min(progress.percentage, 100)}%` }} />
         </div>
+        {progress.status === "running" ? (
+          <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-sm sm:grid-cols-2">
+            <div>
+              <p className="text-slate-500">Transfer speed</p>
+              <p className="font-semibold text-slate-950">
+                {transferRate ? `${formatBytes(transferRate)}/s` : "Calculating from live progress..."}
+              </p>
+            </div>
+            <div>
+              <p className="text-slate-500">Estimated time remaining</p>
+              <p className="font-semibold text-slate-950">
+                {etaLabel ?? (transferRate ? "Finishing..." : "Waiting for transfer activity...")}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </Card>
 
       {active ? (
