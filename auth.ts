@@ -2,8 +2,8 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { env } from "@/lib/env";
 import { encryptToken } from "@/lib/crypto";
-import { connectDb } from "@/lib/db";
-import { User } from "@/models/user";
+import { upsertUser } from "@/lib/cloudflare/d1";
+import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
 
 export const { handlers: { GET, POST }, auth, signIn, signOut } = NextAuth({
   secret: env.nextAuthSecret,
@@ -23,27 +23,22 @@ export const { handlers: { GET, POST }, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async jwt({ token, account }) {
       if (account && token.email && account.access_token) {
-        await connectDb();
-        const encryptedAccessToken = encryptToken(account.access_token);
-        const encryptedRefreshToken = encryptToken(account.refresh_token);
-        const accessTokenExpiresAt = account.expires_at ? new Date(account.expires_at * 1000) : undefined;
+        const cloudflare = getGdmCloudflareEnv();
+        const encryptedAccessToken = encryptToken(account.access_token, cloudflare.TOKEN_ENCRYPTION_KEY);
+        const encryptedRefreshToken = encryptToken(account.refresh_token, cloudflare.TOKEN_ENCRYPTION_KEY);
+        if (!encryptedAccessToken) throw new Error("Unable to store Google authorization");
 
-        await User.findOneAndUpdate(
-          { email: token.email },
-          {
-            $set: {
-              name: token.name ?? token.email,
-              email: token.email,
-              image: token.picture,
-              googleId: account.providerAccountId,
-              accessToken: encryptedAccessToken,
-              ...(accessTokenExpiresAt ? { accessTokenExpiresAt } : {}),
-              ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
-            },
-            ...(!encryptedRefreshToken ? { $setOnInsert: { refreshToken: "" } } : {}),
-          },
-          { upsert: true, new: true },
-        );
+        await upsertUser(cloudflare.DB, {
+          name: token.name ?? token.email,
+          email: token.email,
+          image: typeof token.picture === "string" ? token.picture : null,
+          googleId: account.providerAccountId,
+          accessToken: encryptedAccessToken,
+          refreshToken: encryptedRefreshToken,
+          accessTokenExpiresAt: account.expires_at
+            ? new Date(account.expires_at * 1000).toISOString()
+            : null,
+        });
       }
       return token;
     },
