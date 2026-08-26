@@ -33,6 +33,13 @@ interface ClosableWorker {
   close(): Promise<void>;
 }
 
+class MigrationCancelledError extends Error {
+  constructor() {
+    super("Migration cancelled");
+    this.name = "MigrationCancelledError";
+  }
+}
+
 export function registerMigrationWorkers() {
   const workers: ClosableWorker[] = [];
 
@@ -46,6 +53,7 @@ export function registerMigrationWorkers() {
     try {
       const migration = await Migration.findById(job.data.migrationId);
       if (!migration) throw new Error("Migration not found");
+      if (migration.status === "cancelled") return;
 
       migration.status = "scanning";
       migration.startedAt = migration.startedAt ?? new Date();
@@ -98,6 +106,7 @@ export function registerMigrationWorkers() {
         mappings,
       );
 
+      await assertMigrationActive(migration._id.toString());
       migration.status = "running";
       migration.totalFiles = totals.files;
       migration.totalBytes = totals.bytes;
@@ -120,6 +129,14 @@ export function registerMigrationWorkers() {
 
       await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
     } catch (error) {
+      if (error instanceof MigrationCancelledError) {
+        await MigrationItem.updateMany(
+          { migrationId: job.data.migrationId, itemType: "file", status: "pending" },
+          { $set: { status: "skipped", errorMessage: "Migration cancelled" } },
+        );
+        return;
+      }
+
       const attemptsUsed = job.attemptsMade + 1;
       const attemptsAllowed = job.opts.attempts ?? 1;
 
@@ -339,6 +356,7 @@ async function scanFolder(
   let pageToken: string | undefined;
 
   do {
+    await assertMigrationActive(migrationId);
     const response = await drive.files.list({
       q: `'${sourceFolderId}' in parents and trashed = false`,
       fields: "nextPageToken, files(id,name,mimeType,size,quotaBytesUsed)",
@@ -348,7 +366,14 @@ async function scanFolder(
       includeItemsFromAllDrives: true,
     });
 
+    let filesSinceCancelCheck = 0;
     for (const file of response.data.files ?? []) {
+      if (filesSinceCancelCheck >= 50) {
+        await assertMigrationActive(migrationId);
+        filesSinceCancelCheck = 0;
+      }
+      filesSinceCancelCheck += 1;
+
       const destinationFolderId = mappings.get(sourceFolderId);
       if (!file.id || !destinationFolderId) continue;
 
@@ -441,4 +466,10 @@ async function scanFolder(
   } while (pageToken);
 
   return { files, bytes };
+}
+
+async function assertMigrationActive(migrationId: string) {
+  const migration = await Migration.findById(migrationId).select("status").lean<{ status?: string }>();
+  if (!migration) throw new Error("Migration not found");
+  if (migration.status === "cancelled") throw new MigrationCancelledError();
 }
