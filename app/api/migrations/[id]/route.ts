@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
+import { rateLimit } from "@/lib/rate-limit";
 import { Migration } from "@/models/migration";
 import { MigrationItem } from "@/models/migration-item";
 import { User } from "@/models/user";
@@ -42,6 +43,15 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const { id } = await params;
   const user = await User.findOne({ email: session.user.email }).select("_id").lean<UserIdRecord>();
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+
+  const quota = await rateLimit(`migration-progress:${user._id.toString()}:${id}`, 90, 60_000);
+  if (!quota.allowed) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((quota.resetAt - Date.now()) / 1000));
+    return NextResponse.json(
+      { error: "Too many progress requests. Try again shortly." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+    );
+  }
 
   const migration = await Migration.findById(id).lean<MigrationProgressRecord>();
   if (!migration) return NextResponse.json({ error: "Migration not found" }, { status: 404 });
