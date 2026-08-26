@@ -70,7 +70,7 @@ export function registerMigrationWorkers() {
 
     try {
       const migration = await Migration.findOneAndUpdate(
-        { _id: job.data.migrationId, status: { $nin: ["cancelled", "paused"] } },
+        { _id: job.data.migrationId, status: { $in: ["pending", "scanning"] } },
         { $set: { status: "scanning" }, $unset: { errorMessage: "" } },
         { new: true },
       );
@@ -181,7 +181,7 @@ export function registerMigrationWorkers() {
 
       if (finalFailure) {
         await Migration.updateOne(
-          { _id: job.data.migrationId, status: { $nin: ["paused", "cancelled"] } },
+          { _id: job.data.migrationId, status: "scanning" },
           {
             $set: {
               status: "failed",
@@ -205,35 +205,43 @@ export function registerMigrationWorkers() {
     opts: { attempts?: number };
   }) => {
     await connectDb();
-    const item = await MigrationItem.findById(job.data.itemId);
     const migration = await Migration.findById(job.data.migrationId);
-    if (!item || !migration) throw new Error("Migration item not found");
+    if (!migration) throw new Error("Migration not found");
+
+    const currentItem = await MigrationItem.findById(job.data.itemId);
+    if (!currentItem) throw new Error("Migration item not found");
 
     if (migration.status === "paused") return;
 
     if (migration.status === "cancelled") {
-      if (item.status !== "completed") {
-        item.status = "skipped";
-        item.errorMessage = "Migration cancelled";
-        await item.save();
+      if (currentItem.status !== "completed") {
+        currentItem.status = "skipped";
+        currentItem.errorMessage = "Migration cancelled";
+        await currentItem.save();
       }
       await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
       return;
     }
 
-    if (item.status === "completed" && item.destinationFileId) {
+    if (currentItem.status === "completed" && currentItem.destinationFileId) {
       await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
       return;
     }
 
+    const item = await MigrationItem.findOneAndUpdate(
+      { _id: job.data.itemId, status: "pending" },
+      {
+        $set: { status: "copying", retryCount: job.attemptsMade },
+        $unset: { errorMessage: "" },
+      },
+      { new: true },
+    );
+
+    if (!item) return;
+
     const user = await User.findById(migration.userId);
     if (!user) throw new Error("Migration owner not found");
     const accessToken = await getFreshGoogleAccessToken(user);
-
-    item.status = "copying";
-    item.retryCount = job.attemptsMade;
-    item.errorMessage = undefined;
-    await item.save();
 
     try {
       const sourceDrive = publicDrive();
