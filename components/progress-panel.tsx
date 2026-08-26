@@ -74,6 +74,12 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
     return <Card>Loading migration progress...</Card>;
   }
 
+  const currentFileTotalBytes = progress.currentFileTotalBytes ?? 0;
+  const hasCurrentFileProgress = Boolean(progress.currentFile && currentFileTotalBytes > 0);
+  const currentFilePercentage = hasCurrentFileProgress
+    ? Math.min(100, Math.round(((progress.currentFileUploadedBytes ?? 0) / currentFileTotalBytes) * 100))
+    : 0;
+
   return (
     <div className="space-y-5">
       {error ? <p className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}
@@ -102,6 +108,20 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
           <div><dt className="text-slate-500">Current file</dt><dd className="font-medium">{progress.currentFile ?? "-"}</dd></div>
           <div><dt className="text-slate-500">Bytes copied</dt><dd className="font-medium">{formatBytes(progress.copiedBytes)} / {formatBytes(progress.totalBytes)}</dd></div>
         </dl>
+
+        {hasCurrentFileProgress ? (
+          <div className="mt-5 space-y-2">
+            <div className="flex items-center justify-between gap-4 text-sm">
+              <span className="text-slate-500">Current file transfer</span>
+              <span className="font-medium text-slate-700">
+                {formatBytes(progress.currentFileUploadedBytes)} / {formatBytes(progress.currentFileTotalBytes)} · {currentFilePercentage}%
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full bg-blue-600" style={{ width: `${currentFilePercentage}%` }} />
+            </div>
+          </div>
+        ) : null}
       </Card>
 
       {progress.status === "failed" && progress.failedFiles > 0 ? (

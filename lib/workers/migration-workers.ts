@@ -1,4 +1,5 @@
 import { drive_v3 } from "googleapis";
+import { decryptToken, encryptToken } from "@/lib/crypto";
 import { connectDb } from "@/lib/db";
 import {
   FOLDER_MIME_TYPE,
@@ -8,6 +9,7 @@ import {
   streamCopyFile,
   userDrive,
 } from "@/lib/google/drive";
+import { resumableCopyFile, shouldUseResumableUpload } from "@/lib/google/resumable-upload";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { createMigrationWorker, getReportQueue, getTransferQueue } from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
@@ -171,6 +173,8 @@ export function registerMigrationWorkers() {
       if (existingCopy?.id) {
         item.destinationFileId = existingCopy.id;
         item.status = "completed";
+        item.uploadedBytes = item.size;
+        item.encryptedUploadSessionUrl = undefined;
         await item.save();
         await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
         return;
@@ -182,15 +186,54 @@ export function registerMigrationWorkers() {
         supportsAllDrives: true,
       });
 
-      const uploaded = await streamCopyFile(
-        sourceDrive,
-        destinationDrive,
-        sourceFile.data,
-        item.destinationFolderId,
-        marker,
-      );
-      item.destinationFileId = uploaded.data.id;
+      let destinationFileId: string | null | undefined;
+
+      if (shouldUseResumableUpload(sourceFile.data)) {
+        let sessionUrl: string | undefined;
+        if (item.encryptedUploadSessionUrl) {
+          try {
+            sessionUrl = decryptToken(item.encryptedUploadSessionUrl);
+          } catch {
+            item.encryptedUploadSessionUrl = undefined;
+            item.uploadedBytes = 0;
+            await item.save();
+          }
+        }
+
+        const uploaded = await resumableCopyFile({
+          source: sourceDrive,
+          accessToken,
+          file: sourceFile.data,
+          parentId: item.destinationFolderId,
+          marker,
+          sessionUrl,
+          onSession: async (nextSessionUrl) => {
+            item.encryptedUploadSessionUrl = encryptToken(nextSessionUrl);
+            await item.save();
+          },
+          onProgress: async (uploadedBytes) => {
+            item.uploadedBytes = uploadedBytes;
+            await item.save();
+          },
+        });
+        destinationFileId = uploaded.id;
+      } else {
+        const uploaded = await streamCopyFile(
+          sourceDrive,
+          destinationDrive,
+          sourceFile.data,
+          item.destinationFolderId,
+          marker,
+        );
+        destinationFileId = uploaded.data.id;
+      }
+
+      if (!destinationFileId) throw new Error("Google Drive upload completed without a destination file ID");
+
+      item.destinationFileId = destinationFileId;
       item.status = "completed";
+      item.uploadedBytes = item.size;
+      item.encryptedUploadSessionUrl = undefined;
       await item.save();
 
       await Migration.updateOne(
@@ -352,6 +395,7 @@ async function scanFolder(
             $setOnInsert: {
               status: "pending",
               retryCount: 0,
+              uploadedBytes: 0,
             },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true },

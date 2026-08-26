@@ -21,6 +21,8 @@ interface UserIdRecord {
 
 interface CurrentMigrationItemRecord {
   sourceName?: string;
+  uploadedBytes?: number;
+  size?: number;
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -38,7 +40,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     return NextResponse.json({ error: "Migration not found" }, { status: 404 });
   }
 
-  const current = await MigrationItem.findOne({ migrationId: id, status: "copying" }).lean<CurrentMigrationItemRecord>();
+  const current = await MigrationItem.findOne({ migrationId: id, status: "copying" })
+    .select("sourceName uploadedBytes size")
+    .lean<CurrentMigrationItemRecord>();
   const totalFiles = migration.totalFiles || 0;
   const completedFiles = migration.completedFiles || 0;
   const failedFiles = migration.failedFiles || 0;
@@ -50,6 +54,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     completedFiles,
     failedFiles,
     currentFile: current?.sourceName,
+    currentFileUploadedBytes: current?.uploadedBytes,
+    currentFileTotalBytes: current?.size,
     percentage,
     status: migration.status,
     copiedBytes: migration.copiedBytes,
