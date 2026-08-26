@@ -5,6 +5,7 @@ import { connectDb } from "@/lib/db";
 import { extractDriveFolderId, userDrive, validateDestinationFolder } from "@/lib/google/drive";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { getScanQueue } from "@/lib/queue/migrations";
+import { rateLimit } from "@/lib/rate-limit";
 import { Migration } from "@/models/migration";
 import { User } from "@/models/user";
 
@@ -14,6 +15,8 @@ const CreateMigration = z.object({
   sourceFolderName: z.string().min(1),
   destinationFolderRef: z.string().min(1).max(2048),
 });
+
+const activeStatuses = ["pending", "scanning", "running"];
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -36,6 +39,11 @@ export async function POST(request: Request) {
   const user = await User.findOne({ email: session.user.email });
   if (!user?.accessToken) return NextResponse.json({ error: "Google Drive authorization required" }, { status: 403 });
 
+  const quota = rateLimit(`migration-create:${user._id.toString()}`, 5, 60_000);
+  if (!quota.allowed) {
+    return NextResponse.json({ error: "Too many migration requests. Try again in a minute." }, { status: 429 });
+  }
+
   let destination: { id: string; name: string };
   try {
     const accessToken = await getFreshGoogleAccessToken(user);
@@ -45,6 +53,21 @@ export async function POST(request: Request) {
       { error: error instanceof Error ? error.message : "Unable to access destination folder" },
       { status: 403 },
     );
+  }
+
+  const existingMigration = await Migration.findOne({
+    userId: user._id,
+    sourceFolderId: parsed.data.sourceFolderId,
+    destinationFolderId: destination.id,
+    status: { $in: activeStatuses },
+  }).select("_id status");
+
+  if (existingMigration) {
+    return NextResponse.json({
+      migrationId: existingMigration._id.toString(),
+      status: existingMigration.status,
+      reused: true,
+    });
   }
 
   const migration = await Migration.create({
@@ -66,5 +89,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Migration queue is unavailable. Try again shortly." }, { status: 503 });
   }
 
-  return NextResponse.json({ migrationId: migration._id.toString(), status: migration.status }, { status: 201 });
+  return NextResponse.json({ migrationId: migration._id.toString(), status: migration.status, reused: false }, { status: 201 });
 }
