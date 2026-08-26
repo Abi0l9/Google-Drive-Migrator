@@ -36,6 +36,17 @@ export function assertCopyableDriveFile(file: drive_v3.Schema$File) {
   }
 }
 
+export function destinationFileName(file: drive_v3.Schema$File) {
+  const originalName = file.name?.trim() || "Untitled file";
+  const exportConfig = file.mimeType ? workspaceExports[file.mimeType] : undefined;
+
+  if (!exportConfig || originalName.toLowerCase().endsWith(exportConfig.extension.toLowerCase())) {
+    return originalName;
+  }
+
+  return `${originalName}${exportConfig.extension}`;
+}
+
 export function extractDriveFolderId(folderUrl: string) {
   let url: URL;
   try {
@@ -227,10 +238,8 @@ export async function streamCopyFile(
     ? await source.files.export({ fileId: file.id!, mimeType: exportConfig.mimeType }, { responseType: "stream" })
     : await source.files.get({ fileId: file.id!, alt: "media", supportsAllDrives: true }, { responseType: "stream" });
 
-  const name = exportConfig && !file.name?.endsWith(exportConfig.extension) ? `${file.name}${exportConfig.extension}` : file.name;
-
   return destination.files.create({
-    requestBody: { name, parents: [parentId], appProperties: markerProperties(marker) },
+    requestBody: { name: destinationFileName(file), parents: [parentId], appProperties: markerProperties(marker) },
     media: { mimeType: exportConfig?.mimeType ?? file.mimeType ?? "application/octet-stream", body: sourceStream.data as Readable },
     fields: "id,name,size",
     supportsAllDrives: true,
