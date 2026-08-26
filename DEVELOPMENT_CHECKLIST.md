@@ -16,7 +16,7 @@ Status legend:
 - [x] Next.js standalone production output
 - [x] GitHub Actions CI for dependency audit, tests, typecheck, lint, Next build, and both Docker images
 - [x] Production deployment guide
-- [ ] Restore a freshly generated audited `package-lock.json` and switch CI/images back to deterministic `npm ci`
+- [x] Audited `package-lock.json` with deterministic `npm ci` in CI and Docker images
 
 ## 2. Public folder analyzer
 
@@ -125,8 +125,8 @@ Status legend:
 - [x] Recover expired resumable sessions
 - [x] Retry-safe destination lookup before re-upload
 - [~] Cooperative pause/cancel between resumable chunks
-- [ ] Transfer speed calculation
-- [ ] ETA calculation
+- [x] Smoothed live transfer speed calculation from progress samples
+- [x] ETA calculation with stalled-transfer invalidation
 - [ ] Stream/backpressure soak tests for very large files
 - [ ] User-selectable Workspace export formats
 
@@ -138,6 +138,7 @@ Status legend:
 - [x] Overall processed percentage
 - [x] Total/copied bytes
 - [x] Current file and resumable byte progress
+- [x] Live transfer speed and estimated time remaining
 - [x] Detailed failed-file list with path, retry count, and error
 - [x] Retry only failed items
 - [x] Cancel pending/scanning/running/paused migrations
@@ -171,13 +172,13 @@ Status legend:
 - [x] Picker bootstrap rate limiting
 - [x] Progress-polling rate limiting with `Retry-After`
 - [x] Active migration request deduplication
+- [x] Configurable per-user active migration quota, serialized across replicas with Redis creation lock
 - [x] Encrypted Google credentials at rest
 - [x] Encrypted resumable-session URLs at rest
 - [x] No OAuth token in Auth.js browser session
 - [x] Admin email allowlist and route protection
 - [x] Picker browser token response uses no-store caching
 - [~] Auth.js secure cookie behavior relies on correctly configured production HTTPS/domain
-- [ ] Explicit per-user concurrent migration quota
 - [ ] Per-user data/usage quotas
 - [ ] Content-Security-Policy tuned for Google Picker/Auth assets
 
@@ -200,6 +201,8 @@ Status legend:
 - [x] Scan/transfer/retry/report queue counts
 - [x] Redis availability state
 - [x] Worker heartbeat state and last heartbeat timestamp
+- [x] Warning when queues back up while worker heartbeat is missing
+- [x] Failed BullMQ job warning
 - [x] Dependency-aware `/api/health` endpoint
 - [x] Docker web healthcheck
 - [x] Mongo connection promise resets after failed startup connection
@@ -214,14 +217,17 @@ Status legend:
 - [x] Google error-classification tests
 - [x] Resumable threshold tests
 - [x] Resumable Range-offset parser tests
+- [x] Rate-limiter local fallback tests
+- [x] Workspace export naming tests
+- [x] Migration report CSV/filename formatting tests
+- [x] Active migration quota policy tests
+- [x] Transfer speed/ETA metric tests
 - [x] CI production dependency audit
 - [x] CI TypeScript check
 - [x] CI ESLint
 - [x] CI Next.js production build
 - [x] CI production web Docker image build
 - [x] CI production worker Docker image build
-- [ ] Rate-limiter unit tests
-- [ ] Workspace export naming tests
 - [ ] Migration API integration tests with mocked Google APIs
 - [ ] Pause/resume/cancel API integration tests
 - [ ] Worker tests with isolated MongoDB/Redis/Drive clients
@@ -235,6 +241,7 @@ Status legend:
 - [x] Production deployment guide
 - [x] Google Picker/OAuth setup notes
 - [x] Web and worker container targets
+- [x] Deterministic lockfile-backed dependency installation
 - [x] Health endpoint documentation
 - [x] Encryption-key consistency warning
 - [~] Queue/worker operations guidance
@@ -244,12 +251,11 @@ Status legend:
 
 ## 16. Next hardening priorities
 
-- [ ] Restore audited `package-lock.json` and deterministic installs
 - [ ] Add route/worker integration tests
-- [ ] Add explicit per-user concurrent/data quotas
+- [ ] Add per-user data/usage quotas
 - [ ] Add operational worker/queue alerting
-- [ ] Add transfer speed/ETA
 - [ ] Run large-folder and large-file soak tests
+- [ ] Tune transfer concurrency against observed Google Drive quotas
 
 ## 17. Future product roadmap
 
