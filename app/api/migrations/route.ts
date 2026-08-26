@@ -6,7 +6,11 @@ import { env } from "@/lib/env";
 import { extractDriveFolderId, userDrive, validateDestinationFolder } from "@/lib/google/drive";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { canCreateActiveMigration } from "@/lib/migration/quota";
-import { getScanQueue } from "@/lib/queue/migrations";
+import {
+  getScanQueue,
+  MigrationCreationLockBusyError,
+  withMigrationCreationLock,
+} from "@/lib/queue/migrations";
 import { rateLimit } from "@/lib/rate-limit";
 import { Migration } from "@/models/migration";
 import { User } from "@/models/user";
@@ -19,6 +23,13 @@ const CreateMigration = z.object({
 });
 
 const activeStatuses = ["pending", "scanning", "running", "paused"];
+
+class ActiveMigrationQuotaError extends Error {
+  constructor(public activeCount: number, public maxActive: number) {
+    super("Active migration quota reached");
+    this.name = "ActiveMigrationQuotaError";
+  }
+}
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -57,13 +68,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const existingMigration = await Migration.findOne({
-    userId: user._id,
-    sourceFolderId: parsed.data.sourceFolderId,
-    destinationFolderId: destination.id,
-    status: { $in: activeStatuses },
-  }).select("_id status");
-
+  const existingMigration = await findExistingActiveMigration(user._id, parsed.data.sourceFolderId, destination.id);
   if (existingMigration) {
     return NextResponse.json({
       migrationId: existingMigration._id.toString(),
@@ -72,31 +77,63 @@ export async function POST(request: Request) {
     });
   }
 
-  const activeMigrationCount = await Migration.countDocuments({
-    userId: user._id,
-    status: { $in: activeStatuses },
-  });
+  let creation: { migration: InstanceType<typeof Migration>; reused: boolean };
+  try {
+    creation = await withMigrationCreationLock(user._id.toString(), async () => {
+      const lockedExisting = await findExistingActiveMigration(user._id, parsed.data.sourceFolderId, destination.id);
+      if (lockedExisting) return { migration: lockedExisting, reused: true };
 
-  if (!canCreateActiveMigration(activeMigrationCount, env.maxActiveMigrationsPerUser)) {
-    return NextResponse.json(
-      {
-        error: `You already have ${activeMigrationCount} active migrations. Finish, cancel, or wait for one to complete before starting another.`,
-        maxActiveMigrations: env.maxActiveMigrationsPerUser,
-      },
-      { status: 429 },
-    );
+      const activeMigrationCount = await Migration.countDocuments({
+        userId: user._id,
+        status: { $in: activeStatuses },
+      });
+
+      if (!canCreateActiveMigration(activeMigrationCount, env.maxActiveMigrationsPerUser)) {
+        throw new ActiveMigrationQuotaError(activeMigrationCount, env.maxActiveMigrationsPerUser);
+      }
+
+      const migration = await Migration.create({
+        sourceFolderId: parsed.data.sourceFolderId,
+        sourceFolderUrl: parsed.data.sourceFolderUrl,
+        sourceFolderName: parsed.data.sourceFolderName,
+        destinationFolderId: destination.id,
+        destinationFolderName: destination.name,
+        userId: user._id,
+        status: "pending",
+      });
+
+      return { migration, reused: false };
+    });
+  } catch (error) {
+    if (error instanceof ActiveMigrationQuotaError) {
+      return NextResponse.json(
+        {
+          error: `You already have ${error.activeCount} active migrations. Finish, cancel, or wait for one to complete before starting another.`,
+          maxActiveMigrations: error.maxActive,
+        },
+        { status: 429 },
+      );
+    }
+
+    if (error instanceof MigrationCreationLockBusyError) {
+      return NextResponse.json(
+        { error: "Another migration request is already being processed. Try again shortly." },
+        { status: 409, headers: { "Retry-After": "1" } },
+      );
+    }
+
+    return NextResponse.json({ error: "Migration coordination is unavailable. Try again shortly." }, { status: 503 });
   }
 
-  const migration = await Migration.create({
-    sourceFolderId: parsed.data.sourceFolderId,
-    sourceFolderUrl: parsed.data.sourceFolderUrl,
-    sourceFolderName: parsed.data.sourceFolderName,
-    destinationFolderId: destination.id,
-    destinationFolderName: destination.name,
-    userId: user._id,
-    status: "pending",
-  });
+  if (creation.reused) {
+    return NextResponse.json({
+      migrationId: creation.migration._id.toString(),
+      status: creation.migration.status,
+      reused: true,
+    });
+  }
 
+  const migration = creation.migration;
   try {
     await getScanQueue().add("scan-folder", { migrationId: migration._id.toString() });
   } catch (error) {
@@ -107,4 +144,13 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ migrationId: migration._id.toString(), status: migration.status, reused: false }, { status: 201 });
+}
+
+function findExistingActiveMigration(userId: unknown, sourceFolderId: string, destinationFolderId: string) {
+  return Migration.findOne({
+    userId,
+    sourceFolderId,
+    destinationFolderId,
+    status: { $in: activeStatuses },
+  }).select("_id status");
 }
