@@ -9,7 +9,7 @@ interface UserIdRecord {
   _id: { toString(): string };
 }
 
-const cancellableStatuses = new Set(["pending", "scanning", "running"]);
+const cancellableStatuses = new Set(["pending", "scanning", "running", "paused"]);
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
