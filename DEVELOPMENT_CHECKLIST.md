@@ -12,9 +12,9 @@ Status legend:
 - [x] Tailwind CSS and reusable UI primitives
 - [x] Environment variable template
 - [x] Docker Compose local stack with MongoDB and Redis healthchecks
-- [x] Multi-stage Dockerfile with `dev`, production web, and production worker targets
+- [x] Multi-stage Dockerfile with `dev`, production web, production worker, and default production targets
 - [x] Next.js standalone production output
-- [x] GitHub Actions CI for production dependency audit, tests, typecheck, lint, and build
+- [x] GitHub Actions CI for dependency audit, tests, typecheck, lint, Next build, and both Docker images
 - [x] Production deployment guide
 - [ ] Restore a freshly generated audited `package-lock.json` and switch CI/images back to deterministic `npm ci`
 
@@ -23,15 +23,15 @@ Status legend:
 - [x] Public Google Drive folder URL input
 - [x] `/folders/:id` and `?id=` folder ID parsing
 - [x] Restrict source URLs to `drive.google.com`
-- [x] Validate that the source is a folder and publicly accessible
+- [x] Validate source folder and public accessibility
 - [x] Recursive nested-folder scan
 - [x] File/folder counts and total standard-file bytes
 - [x] Loading and error states
 - [~] Cooperative scan cancellation and pause checks
+- [x] Shortcut traversal is not followed, preventing shortcut-based folder cycles
 - [ ] Persist analyzed state across navigation/reloads
 - [ ] Large-scan progress during analysis
 - [ ] Scan-result caching with expiry
-- [ ] Explicit shortcut/cycle handling
 
 ## 3. Authentication and Google authorization
 
@@ -71,7 +71,7 @@ Status legend:
 - [x] Reuse scan records on rescan/retry
 - [x] Server-side deduplication of active source+destination migration creation
 - [x] Paused migrations count as active duplicates
-- [~] Transfer worker leases protect against overlapping resume/retry jobs and stale claims
+- [~] Transfer leases protect against overlapping resume/retry jobs and stale claims
 - [ ] Retention/cleanup policy for completed migration and item records
 
 ## 6. Queue and worker system
@@ -86,16 +86,16 @@ Status legend:
 - [x] Transfer worker
 - [x] Retry/resume sweep worker
 - [x] Report worker
-- [x] Graceful worker/queue/Redis shutdown on SIGTERM/SIGINT
+- [x] Graceful shutdown on SIGTERM/SIGINT
 - [x] Atomic transfer-item claims
 - [x] Transfer leases with stale-job recovery
-- [~] Conservative transfer concurrency (currently 1 per worker process)
+- [~] Conservative transfer concurrency, currently 1 per worker process
+- [x] Worker heartbeat stored in Redis with expiry
 - [x] Protected admin queue counters
-- [ ] Dedicated worker heartbeat/liveness record
 - [ ] Queue alerting/metrics export
 - [ ] Dead-letter management UI
 
-## 7. Folder recreation engine
+## 7. Folder recreation and source-item policy
 
 - [x] Create destination migration root
 - [x] Recreate nested folder structure recursively
@@ -103,9 +103,10 @@ Status legend:
 - [x] Store source-to-destination mappings
 - [x] Retry-safe/idempotent folder creation through app-property markers
 - [x] Shared Drive-compatible Drive flags
-- [ ] Explicit duplicate-name/collision policy for pre-existing untagged destination content
+- [x] Explicit Drive shortcut rejection rather than silently preserving source-dependent links
+- [x] Unsupported Google Workspace item types fail once with a clear permanent error
+- [ ] Duplicate-name/collision policy for pre-existing untagged destination content
 - [ ] Preserve supported folder metadata
-- [ ] Explicit Google Drive shortcut handling
 
 ## 8. File transfer engine
 
@@ -129,14 +130,14 @@ Status legend:
 - [ ] Stream/backpressure soak tests for very large files
 - [ ] User-selectable Workspace export formats
 
-## 9. Progress, pause, resume, cancel, retry
+## 9. Progress, pause, resume, cancel, retry, reports
 
 - [x] Migration detail/progress page
 - [x] Polling progress UI
 - [x] Total/completed/failed files
 - [x] Overall processed percentage
 - [x] Total/copied bytes
-- [x] Current file and per-file resumable byte progress
+- [x] Current file and resumable byte progress
 - [x] Detailed failed-file list with path, retry count, and error
 - [x] Retry only failed items
 - [x] Cancel pending/scanning/running/paused migrations
@@ -144,9 +145,9 @@ Status legend:
 - [x] Resume paused scans idempotently
 - [x] Resume paused transfer migrations through delayed retry sweep
 - [x] Preserve resumable upload state across pause/resume
-- [~] Small direct-stream uploads may finish before a pause/cancel can take effect
+- [x] Owner-only downloadable CSV and JSON migration reports
+- [~] Small direct-stream uploads may finish before pause/cancel takes effect
 - [ ] SSE/WebSocket progress instead of polling
-- [ ] Completion summary/report export (JSON/CSV)
 
 ## 10. Google/API error handling
 
@@ -156,7 +157,8 @@ Status legend:
 - [x] Store transfer failure messages
 - [x] Distinguish retryable vs permanent Google API errors
 - [x] Retry rate limits, 429, transient network failures, and Google 5xx failures
-- [x] Stop retrying ordinary permission/not-found/auth/invalid-request failures
+- [x] Stop retrying permission/not-found/auth/invalid-request failures
+- [x] Stop retrying unsupported Drive item types
 - [x] Use BullMQ `UnrecoverableError` for permanent failures
 - [x] Resumable-session 404/410 recovery
 - [ ] Rich user-facing troubleshooting taxonomy/actions for every common Google error reason
@@ -164,20 +166,19 @@ Status legend:
 ## 11. Security and abuse prevention
 
 - [x] Basic security headers
-- [x] Analyzer rate limiting
+- [x] Redis-backed distributed analyzer rate limiting with process-local fallback
 - [x] Migration creation rate limiting
-- [x] Picker-token bootstrap rate limiting
+- [x] Picker bootstrap rate limiting
+- [x] Progress-polling rate limiting with `Retry-After`
 - [x] Active migration request deduplication
 - [x] Encrypted Google credentials at rest
 - [x] Encrypted resumable-session URLs at rest
 - [x] No OAuth token in Auth.js browser session
-- [x] Admin email allowlist
-- [x] Admin route protection
+- [x] Admin email allowlist and route protection
 - [x] Picker browser token response uses no-store caching
 - [~] Auth.js secure cookie behavior relies on correctly configured production HTTPS/domain
 - [ ] Explicit per-user concurrent migration quota
 - [ ] Per-user data/usage quotas
-- [ ] Distributed rate limiting for multi-instance deployments (current limiter is process-local)
 - [ ] Content-Security-Policy tuned for Google Picker/Auth assets
 
 ## 12. User dashboard
@@ -192,26 +193,24 @@ Status legend:
 
 ## 13. Admin and operations
 
-- [x] Protected `/admin` route using `ADMIN_EMAILS`
-- [x] Total users
-- [x] Total migrations
-- [x] Active migrations including paused
-- [x] Failed migrations
-- [x] Total completed files
-- [x] Total copied bytes
+- [x] Protected `/admin` using `ADMIN_EMAILS`
+- [x] Total users and migrations
+- [x] Active and failed migrations
+- [x] Total completed files and copied bytes
 - [x] Scan/transfer/retry/report queue counts
-- [x] Redis availability state in admin UI
-- [x] Public dependency-aware `/api/health` endpoint
+- [x] Redis availability state
+- [x] Worker heartbeat state and last heartbeat timestamp
+- [x] Dependency-aware `/api/health` endpoint
 - [x] Docker web healthcheck
 - [x] Mongo connection promise resets after failed startup connection
-- [ ] Worker heartbeat/health endpoint or record
 - [ ] Admin migration filters/details
 - [ ] Admin failed-job retry/removal operations
-- [ ] Operational alerting
+- [ ] Operational alerting beyond heartbeat visibility
 
 ## 14. Testing and validation
 
 - [x] Drive URL parser tests
+- [x] Drive item support-policy tests
 - [x] Google error-classification tests
 - [x] Resumable threshold tests
 - [x] Resumable Range-offset parser tests
@@ -219,12 +218,13 @@ Status legend:
 - [x] CI TypeScript check
 - [x] CI ESLint
 - [x] CI Next.js production build
+- [x] CI production web Docker image build
+- [x] CI production worker Docker image build
 - [ ] Rate-limiter unit tests
 - [ ] Workspace export naming tests
 - [ ] Migration API integration tests with mocked Google APIs
 - [ ] Pause/resume/cancel API integration tests
 - [ ] Worker tests with isolated MongoDB/Redis/Drive clients
-- [ ] Docker image build smoke test in CI
 - [ ] End-to-end analyze → Picker → migration → completion test
 - [ ] Load/soak tests with thousands of files and multi-GB transfers
 
@@ -245,11 +245,9 @@ Status legend:
 ## 16. Next hardening priorities
 
 - [ ] Restore audited `package-lock.json` and deterministic installs
-- [ ] Add distributed per-user quotas/rate limits
-- [ ] Add worker heartbeat and alerting
-- [ ] Add Worker/API integration tests
-- [ ] Add shortcut/cycle handling
-- [ ] Add downloadable completion report
+- [ ] Add route/worker integration tests
+- [ ] Add explicit per-user concurrent/data quotas
+- [ ] Add operational worker/queue alerting
 - [ ] Add transfer speed/ETA
 - [ ] Run large-folder and large-file soak tests
 
