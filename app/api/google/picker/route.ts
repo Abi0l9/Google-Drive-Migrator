@@ -30,7 +30,7 @@ export async function GET() {
     return NextResponse.json({ error: "Google Drive authorization required" }, { status: 403, headers: noStoreHeaders });
   }
 
-  const quota = rateLimit(`picker-token:${user._id.toString()}`, 20, 60_000);
+  const quota = await rateLimit(`picker-token:${user._id.toString()}`, 20, 60_000);
   if (!quota.allowed) {
     return NextResponse.json({ error: "Too many Picker requests. Try again in a minute." }, { status: 429, headers: noStoreHeaders });
   }
