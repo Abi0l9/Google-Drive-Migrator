@@ -106,6 +106,10 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
     <div className="space-y-5">
       {error ? <p className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}
 
+      {progress.errorMessage ? (
+        <p className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-800">{progress.errorMessage}</p>
+      ) : null}
+
       <Card>
         <div className="mb-3 flex items-center justify-between gap-4">
           <div>
@@ -157,6 +161,29 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
           </div>
         ) : null}
       </Card>
+
+      {progress.failedItems?.length ? (
+        <Card>
+          <div className="mb-4">
+            <h3 className="font-semibold text-slate-950">Failed files</h3>
+            <p className="text-sm text-slate-600">Showing the latest {progress.failedItems.length} failures and why they stopped.</p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {progress.failedItems.map((item) => (
+              <div key={item.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-slate-950">{item.name}</p>
+                    <p className="truncate text-xs text-slate-500">{item.path}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-slate-500">{item.retryCount} attempt{item.retryCount === 1 ? "" : "s"}</span>
+                </div>
+                {item.error ? <p className="mt-2 text-sm text-red-700">{item.error}</p> : null}
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
       {progress.status === "failed" && progress.failedFiles > 0 ? (
         <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

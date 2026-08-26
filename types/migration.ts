@@ -10,6 +10,14 @@ export interface FolderAnalysis {
   size: number;
 }
 
+export interface FailedMigrationItem {
+  id: string;
+  name: string;
+  path: string;
+  error?: string;
+  retryCount: number;
+}
+
 export interface ProgressSnapshot {
   totalFiles: number;
   completedFiles: number;
@@ -21,4 +29,6 @@ export interface ProgressSnapshot {
   status?: MigrationStatus;
   copiedBytes?: number;
   totalBytes?: number;
+  errorMessage?: string;
+  failedItems?: FailedMigrationItem[];
 }
