@@ -25,6 +25,13 @@ test("does not retry permission, invalid credential, or missing-file errors", ()
   assert.equal(classifyGoogleDriveError({ response: { status: 404 } }), "permanent");
 });
 
+test("does not retry GDM unsupported Drive item errors", () => {
+  assert.equal(classifyGoogleDriveError({
+    code: "GDM_UNSUPPORTED_DRIVE_ITEM",
+    message: "Google Drive shortcuts are not copied",
+  }), "permanent");
+});
+
 test("extracts status from resumable upload error messages", () => {
   const details = googleDriveErrorDetails(new Error("Google Drive resumable upload failed (503): backend unavailable"));
   assert.equal(details.status, 503);
