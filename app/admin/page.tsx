@@ -94,6 +94,9 @@ export default async function AdminPage() {
   ]);
 
   const totals = totalsResult[0];
+  const queuedWork = queueHealth.queues.reduce((sum, queue) => sum + queue.waiting + queue.active + queue.delayed, 0);
+  const failedQueueJobs = queueHealth.queues.reduce((sum, queue) => sum + queue.failed, 0);
+  const workerBacklogAlert = queueHealth.online && !queueHealth.workerOnline && queuedWork > 0;
   const metrics = [
     { label: "Total Users", value: totalUsers.toLocaleString() },
     { label: "Total Migrations", value: totalMigrations.toLocaleString() },
@@ -119,6 +122,20 @@ export default async function AdminPage() {
           </span>
         </div>
       </div>
+
+      {workerBacklogAlert ? (
+        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <strong className="block text-red-950">Worker outage with queued work</strong>
+          <span>{queuedWork.toLocaleString()} queued/active/delayed jobs are present but no fresh worker heartbeat exists. Check the worker deployment before the backlog grows.</span>
+        </div>
+      ) : null}
+
+      {failedQueueJobs > 0 ? (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <strong className="block">Failed BullMQ jobs need attention</strong>
+          <span>{failedQueueJobs.toLocaleString()} failed jobs remain across the migration queues. Review the queue table and related migration failures.</span>
+        </div>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-3">
         {metrics.map((metric) => (
