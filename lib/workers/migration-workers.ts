@@ -16,72 +16,107 @@ interface TransferJobData {
   itemId: string;
 }
 
+interface ClosableWorker {
+  close(): Promise<void>;
+}
+
 export function registerMigrationWorkers() {
-  createMigrationWorker<ScanJobData>("scan", async (job: { data: ScanJobData }) => {
+  const workers: ClosableWorker[] = [];
+
+  workers.push(createMigrationWorker<ScanJobData>("scan", async (job: {
+    data: ScanJobData;
+    attemptsMade: number;
+    opts: { attempts?: number };
+  }) => {
     await connectDb();
-    const migration = await Migration.findById(job.data.migrationId);
-    if (!migration) throw new Error("Migration not found");
 
-    migration.status = "scanning";
-    migration.startedAt = migration.startedAt ?? new Date();
-    migration.errorMessage = undefined;
-    await migration.save();
+    try {
+      const migration = await Migration.findById(job.data.migrationId);
+      if (!migration) throw new Error("Migration not found");
 
-    const sourceDrive = publicDrive();
-    const user = await User.findById(migration.userId);
-    if (!user) throw new Error("Migration owner not found");
-
-    const accessToken = await getFreshGoogleAccessToken(user);
-    const destinationDrive = userDrive(accessToken);
-
-    let rootDestinationId = migration.destinationRootFolderId as string | undefined;
-    if (!rootDestinationId) {
-      const rootFolder = await createDestinationFolder(
-        destinationDrive,
-        migration.sourceFolderName,
-        migration.destinationFolderId,
-      );
-      rootDestinationId = rootFolder.id ?? undefined;
-      if (!rootDestinationId) throw new Error("Unable to create destination root folder");
-
-      migration.destinationRootFolderId = rootDestinationId;
+      migration.status = "scanning";
+      migration.startedAt = migration.startedAt ?? new Date();
+      migration.errorMessage = undefined;
       await migration.save();
-    }
 
-    const mappings = new Map<string, string>([[migration.sourceFolderId, rootDestinationId]]);
-    const totals = await scanFolder(
-      sourceDrive,
-      destinationDrive,
-      migration._id.toString(),
-      migration.sourceFolderId,
-      migration.sourceFolderName,
-      mappings,
-    );
+      const sourceDrive = publicDrive();
+      const user = await User.findById(migration.userId);
+      if (!user) throw new Error("Migration owner not found");
 
-    migration.status = "running";
-    migration.totalFiles = totals.files;
-    migration.totalBytes = totals.bytes;
-    await migration.save();
+      const accessToken = await getFreshGoogleAccessToken(user);
+      const destinationDrive = userDrive(accessToken);
 
-    const pendingFiles = await MigrationItem.find({
-      migrationId: migration._id,
-      itemType: "file",
-      status: "pending",
-    }).select("_id");
+      let rootDestinationId = migration.destinationRootFolderId as string | undefined;
+      if (!rootDestinationId) {
+        const rootFolder = await createDestinationFolder(
+          destinationDrive,
+          migration.sourceFolderName,
+          migration.destinationFolderId,
+        );
+        rootDestinationId = rootFolder.id ?? undefined;
+        if (!rootDestinationId) throw new Error("Unable to create destination root folder");
 
-    if (pendingFiles.length) {
-      await getTransferQueue().addBulk(
-        pendingFiles.map((item: { _id: { toString(): string } }) => ({
-          name: "transfer-file",
-          data: { migrationId: migration._id.toString(), itemId: item._id.toString() },
-        })),
+        migration.destinationRootFolderId = rootDestinationId;
+        await migration.save();
+      }
+
+      const mappings = new Map<string, string>([[migration.sourceFolderId, rootDestinationId]]);
+      const totals = await scanFolder(
+        sourceDrive,
+        destinationDrive,
+        migration._id.toString(),
+        migration.sourceFolderId,
+        migration.sourceFolderName,
+        mappings,
       );
+
+      migration.status = "running";
+      migration.totalFiles = totals.files;
+      migration.totalBytes = totals.bytes;
+      await migration.save();
+
+      const pendingFiles = await MigrationItem.find({
+        migrationId: migration._id,
+        itemType: "file",
+        status: "pending",
+      }).select("_id");
+
+      if (pendingFiles.length) {
+        await getTransferQueue().addBulk(
+          pendingFiles.map((item: { _id: { toString(): string } }) => ({
+            name: "transfer-file",
+            data: { migrationId: migration._id.toString(), itemId: item._id.toString() },
+          })),
+        );
+      }
+
+      await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
+    } catch (error) {
+      const attemptsUsed = job.attemptsMade + 1;
+      const attemptsAllowed = job.opts.attempts ?? 1;
+
+      if (attemptsUsed >= attemptsAllowed) {
+        await Migration.updateOne(
+          { _id: job.data.migrationId },
+          {
+            $set: {
+              status: "failed",
+              errorMessage: error instanceof Error ? error.message : "Migration scan failed",
+              completedAt: new Date(),
+            },
+          },
+        );
+      }
+
+      throw error;
     }
+  }));
 
-    await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
-  });
-
-  createMigrationWorker<TransferJobData>("transfer", async (job: { data: TransferJobData; attemptsMade: number; opts: { attempts?: number } }) => {
+  workers.push(createMigrationWorker<TransferJobData>("transfer", async (job: {
+    data: TransferJobData;
+    attemptsMade: number;
+    opts: { attempts?: number };
+  }) => {
     await connectDb();
     const item = await MigrationItem.findById(job.data.itemId);
     const migration = await Migration.findById(job.data.migrationId);
@@ -135,9 +170,9 @@ export function registerMigrationWorkers() {
 
       throw error;
     }
-  }, 1);
+  }, 1));
 
-  createMigrationWorker<ScanJobData>("report", async (job: { data: ScanJobData }) => {
+  workers.push(createMigrationWorker<ScanJobData>("report", async (job: { data: ScanJobData }) => {
     await connectDb();
     const migration = await Migration.findById(job.data.migrationId);
     if (!migration) return;
@@ -169,7 +204,9 @@ export function registerMigrationWorkers() {
     }
 
     await migration.save();
-  }, 1);
+  }, 1));
+
+  return workers;
 }
 
 async function scanFolder(
