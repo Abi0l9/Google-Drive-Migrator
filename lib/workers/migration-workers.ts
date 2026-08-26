@@ -1,3 +1,4 @@
+import { UnrecoverableError } from "bullmq";
 import { drive_v3 } from "googleapis";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import { connectDb } from "@/lib/db";
@@ -14,6 +15,7 @@ import {
   resumableCopyFile,
   shouldUseResumableUpload,
 } from "@/lib/google/resumable-upload";
+import { classifyGoogleDriveError, googleDriveErrorDetails } from "@/lib/google/error-classification";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { createMigrationWorker, getReportQueue, getTransferQueue } from "@/lib/queue/migrations";
 import { Migration } from "@/models/migration";
@@ -137,22 +139,28 @@ export function registerMigrationWorkers() {
         return;
       }
 
+      const classification = classifyGoogleDriveError(error);
+      const details = googleDriveErrorDetails(error);
       const attemptsUsed = job.attemptsMade + 1;
       const attemptsAllowed = job.opts.attempts ?? 1;
+      const finalFailure = classification === "permanent" || attemptsUsed >= attemptsAllowed;
 
-      if (attemptsUsed >= attemptsAllowed) {
+      if (finalFailure) {
         await Migration.updateOne(
           { _id: job.data.migrationId },
           {
             $set: {
               status: "failed",
-              errorMessage: error instanceof Error ? error.message : "Migration scan failed",
+              errorMessage: details.message,
               completedAt: new Date(),
             },
           },
         );
       }
 
+      if (classification === "permanent") {
+        throw new UnrecoverableError(details.message);
+      }
       throw error;
     }
   }));
@@ -290,11 +298,14 @@ export function registerMigrationWorkers() {
         return;
       }
 
+      const classification = classifyGoogleDriveError(error);
+      const details = googleDriveErrorDetails(error);
       const attemptsUsed = job.attemptsMade + 1;
       const attemptsAllowed = job.opts.attempts ?? 1;
+      const finalFailure = classification === "permanent" || attemptsUsed >= attemptsAllowed;
       item.retryCount = attemptsUsed;
-      item.errorMessage = error instanceof Error ? error.message : "Unknown upload failure";
-      item.status = attemptsUsed >= attemptsAllowed ? "failed" : "pending";
+      item.errorMessage = details.message;
+      item.status = finalFailure ? "failed" : "pending";
       await item.save();
 
       if (item.status === "failed") {
@@ -302,6 +313,9 @@ export function registerMigrationWorkers() {
         await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
       }
 
+      if (classification === "permanent") {
+        throw new UnrecoverableError(details.message);
+      }
       throw error;
     }
   }, 1));
