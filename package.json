@@ -12,30 +12,30 @@
     "test": "node tests/drive-url-parser.test.mjs"
   },
   "dependencies": {
-    "bullmq": "^5.58.9",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "googleapis": "^159.0.0",
-    "ioredis": "^5.8.2",
-    "lucide-react": "^0.468.0",
-    "mongoose": "^8.19.1",
-    "next": "^16.0.0",
-    "next-auth": "^5.0.0-beta.29",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.3.1",
-    "zod": "^4.1.12"
+    "bullmq": "5.79.0",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "googleapis": "159.0.0",
+    "ioredis": "5.11.1",
+    "lucide-react": "0.468.0",
+    "mongoose": "8.24.4",
+    "next": "16.3.3",
+    "next-auth": "5.0.0-beta.32",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "tailwind-merge": "3.6.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^9.16.0",
-    "eslint-config-next": "^16.0.0",
-    "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.16",
-    "typescript": "^5.7.2",
-    "tsx": "^4.20.6"
+    "@types/node": "22.19.21",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "autoprefixer": "10.5.0",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.9",
+    "postcss": "8.5.23",
+    "tailwindcss": "3.4.19",
+    "typescript": "5.9.3",
+    "tsx": "4.22.4"
   }
 }
