@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const user = await User.findOne({ email: session.user.email });
   if (!user?.accessToken) return NextResponse.json({ error: "Google Drive authorization required" }, { status: 403 });
 
-  const quota = rateLimit(`migration-create:${user._id.toString()}`, 5, 60_000);
+  const quota = await rateLimit(`migration-create:${user._id.toString()}`, 5, 60_000);
   if (!quota.allowed) {
     return NextResponse.json({ error: "Too many migration requests. Try again in a minute." }, { status: 429 });
   }
