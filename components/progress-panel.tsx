@@ -14,6 +14,8 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
 
   const loadProgress = useCallback(async () => {
     try {
@@ -46,25 +48,41 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
     };
   }, [loadProgress]);
 
-  async function cancelMigration() {
-    setCancelling(true);
+  async function runMigrationAction(
+    action: "pause" | "resume" | "cancel",
+    setBusy: (value: boolean) => void,
+    fallbackError: string,
+  ) {
+    setBusy(true);
     setError(null);
 
     try {
-      const response = await fetch(`/api/migrations/${migrationId}/cancel`, { method: "POST" });
+      const response = await fetch(`/api/migrations/${migrationId}/${action}`, { method: "POST" });
       const payload = await response.json();
 
       if (!response.ok) {
-        setError(payload.error ?? "Unable to cancel migration");
+        setError(payload.error ?? fallbackError);
         return;
       }
 
       await loadProgress();
     } catch {
-      setError("Unable to cancel migration. Check your connection and try again.");
+      setError(`${fallbackError}. Check your connection and try again.`);
     } finally {
-      setCancelling(false);
+      setBusy(false);
     }
+  }
+
+  async function cancelMigration() {
+    await runMigrationAction("cancel", setCancelling, "Unable to cancel migration");
+  }
+
+  async function pauseMigration() {
+    await runMigrationAction("pause", setPausing, "Unable to pause migration");
+  }
+
+  async function resumeMigration() {
+    await runMigrationAction("resume", setResuming, "Unable to resume migration");
   }
 
   async function retryFailedFiles() {
@@ -101,6 +119,7 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   const currentFilePercentage = hasCurrentFileProgress
     ? Math.min(100, Math.round(((progress.currentFileUploadedBytes ?? 0) / currentFileTotalBytes) * 100))
     : 0;
+  const active = ["pending", "scanning", "running"].includes(progress.status ?? "");
 
   return (
     <div className="space-y-5">
@@ -123,15 +142,41 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
         </div>
       </Card>
 
-      {["pending", "scanning", "running"].includes(progress.status ?? "") ? (
-        <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {active ? (
+        <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="font-semibold text-slate-950">Need to stop this migration?</h3>
-            <p className="text-sm text-slate-600">Queued files stop immediately. A small file already streaming may finish first.</p>
+            <h3 className="font-semibold text-slate-950">Migration controls</h3>
+            <p className="text-sm text-slate-600">
+              Pause keeps resumable upload progress. Cancel stops the migration permanently.
+            </p>
           </div>
-          <Button onClick={cancelMigration} disabled={cancelling}>
-            {cancelling ? "Cancelling..." : "Cancel migration"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={pauseMigration} disabled={pausing || cancelling}>
+              {pausing ? "Pausing..." : "Pause"}
+            </Button>
+            <Button onClick={cancelMigration} disabled={cancelling || pausing}>
+              {cancelling ? "Cancelling..." : "Cancel migration"}
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
+      {progress.status === "paused" ? (
+        <Card className="flex flex-col gap-4 border-amber-200 bg-amber-50 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-950">Migration paused</h3>
+            <p className="text-sm text-slate-600">
+              Completed files stay completed, and resumable large-file sessions keep their confirmed byte position.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={resumeMigration} disabled={resuming || cancelling}>
+              {resuming ? "Resuming..." : "Resume migration"}
+            </Button>
+            <Button onClick={cancelMigration} disabled={cancelling || resuming}>
+              {cancelling ? "Cancelling..." : "Cancel migration"}
+            </Button>
+          </div>
         </Card>
       ) : null}
 
