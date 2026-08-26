@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
+import { buildMigrationCsv, safeReportFileName } from "@/lib/migration/report";
 import { Migration } from "@/models/migration";
 import { MigrationItem } from "@/models/migration-item";
 import { User } from "@/models/user";
@@ -68,9 +69,23 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     .sort({ sourcePath: 1 })
     .lean<ReportItemRecord[]>();
 
+  const reportItems = items.map((item) => ({
+    id: item._id.toString(),
+    type: item.itemType,
+    name: item.sourceName,
+    path: item.sourcePath,
+    mimeType: item.sourceMimeType,
+    size: item.size ?? 0,
+    status: item.status,
+    destinationFileId: item.destinationFileId,
+    destinationFolderId: item.destinationFolderId,
+    retryCount: item.retryCount ?? 0,
+    error: item.errorMessage,
+  }));
+
   const url = new URL(request.url);
   const format = url.searchParams.get("format") === "json" ? "json" : "csv";
-  const baseName = safeFileName(migration.sourceFolderName || "migration");
+  const baseName = safeReportFileName(migration.sourceFolderName || "migration");
 
   if (format === "json") {
     return new Response(JSON.stringify({
@@ -92,50 +107,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         completedAt: migration.completedAt,
         createdAt: migration.createdAt,
       },
-      items: items.map((item) => ({
-        id: item._id.toString(),
-        type: item.itemType,
-        name: item.sourceName,
-        path: item.sourcePath,
-        mimeType: item.sourceMimeType,
-        size: item.size ?? 0,
-        status: item.status,
-        destinationFileId: item.destinationFileId,
-        destinationFolderId: item.destinationFolderId,
-        retryCount: item.retryCount ?? 0,
-        error: item.errorMessage,
-      })),
+      items: reportItems,
     }, null, 2), {
       headers: downloadHeaders(`${baseName}-migration-report.json`, "application/json; charset=utf-8"),
     });
   }
 
-  const header = [
-    "type",
-    "name",
-    "path",
-    "mime_type",
-    "size_bytes",
-    "status",
-    "destination_file_id",
-    "destination_folder_id",
-    "retry_count",
-    "error",
-  ];
-  const rows = items.map((item) => [
-    item.itemType,
-    item.sourceName,
-    item.sourcePath,
-    item.sourceMimeType,
-    item.size ?? 0,
-    item.status,
-    item.destinationFileId ?? "",
-    item.destinationFolderId ?? "",
-    item.retryCount ?? 0,
-    item.errorMessage ?? "",
-  ]);
-  const csv = [header, ...rows].map((row) => row.map(csvValue).join(",")).join("\n");
-
+  const csv = buildMigrationCsv(reportItems);
   return new Response(`\uFEFF${csv}\n`, {
     headers: downloadHeaders(`${baseName}-migration-report.csv`, "text/csv; charset=utf-8"),
   });
@@ -148,15 +126,4 @@ function downloadHeaders(fileName: string, contentType: string) {
     "Content-Type": contentType,
     "X-Content-Type-Options": "nosniff",
   };
-}
-
-function safeFileName(value: string) {
-  const normalized = value.normalize("NFKD").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return normalized.slice(0, 80) || "migration";
-}
-
-function csvValue(value: string | number) {
-  const text = String(value);
-  if (!/[",\r\n]/.test(text)) return text;
-  return `"${text.replace(/"/g, '""')}"`;
 }
