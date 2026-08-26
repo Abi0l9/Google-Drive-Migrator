@@ -3,12 +3,38 @@ import { Readable } from "node:stream";
 import type { FolderAnalysis } from "@/types/migration";
 
 export const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+export const SHORTCUT_MIME_TYPE = "application/vnd.google-apps.shortcut";
 
 const workspaceExports: Record<string, { mimeType: string; extension: string }> = {
   "application/vnd.google-apps.document": { mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", extension: ".docx" },
   "application/vnd.google-apps.spreadsheet": { mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extension: ".xlsx" },
   "application/vnd.google-apps.presentation": { mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", extension: ".pptx" },
 };
+
+export class UnsupportedDriveItemError extends Error {
+  code = "GDM_UNSUPPORTED_DRIVE_ITEM";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedDriveItemError";
+  }
+}
+
+export function assertCopyableDriveFile(file: drive_v3.Schema$File) {
+  const mimeType = file.mimeType ?? "";
+
+  if (mimeType === SHORTCUT_MIME_TYPE) {
+    throw new UnsupportedDriveItemError(
+      "Google Drive shortcuts are not copied because the destination would still depend on the original source. Replace the shortcut with the actual file or folder before migrating.",
+    );
+  }
+
+  if (mimeType.startsWith("application/vnd.google-apps.") && !workspaceExports[mimeType]) {
+    throw new UnsupportedDriveItemError(
+      `This Google Workspace item type (${mimeType}) does not have a supported migration export yet.`,
+    );
+  }
+}
 
 export function extractDriveFolderId(folderUrl: string) {
   let url: URL;
@@ -194,6 +220,8 @@ export async function streamCopyFile(
   parentId: string,
   marker?: MigrationMarker,
 ) {
+  assertCopyableDriveFile(file);
+
   const exportConfig = file.mimeType ? workspaceExports[file.mimeType] : undefined;
   const sourceStream = exportConfig
     ? await source.files.export({ fileId: file.id!, mimeType: exportConfig.mimeType }, { responseType: "stream" })
