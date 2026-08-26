@@ -16,7 +16,7 @@ const CreateMigration = z.object({
   destinationFolderRef: z.string().min(1).max(2048),
 });
 
-const activeStatuses = ["pending", "scanning", "running"];
+const activeStatuses = ["pending", "scanning", "running", "paused"];
 
 export async function POST(request: Request) {
   const session = await auth();
