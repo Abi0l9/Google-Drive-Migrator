@@ -9,9 +9,15 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "worker": "tsx worker.ts",
-    "test": "tsx --test tests/*.test.ts tests/*.test.mjs"
+    "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "cf:typegen:jobs": "wrangler types --config wrangler.jobs.jsonc --env-interface CloudflareJobsEnv cloudflare-jobs-env.d.ts"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "1.20.2",
     "bullmq": "5.79.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -35,7 +41,8 @@
     "eslint-config-next": "16.2.9",
     "postcss": "8.5.23",
     "tailwindcss": "3.4.19",
+    "tsx": "4.22.4",
     "typescript": "5.9.3",
-    "tsx": "4.22.4"
+    "wrangler": "4.125.0"
   }
 }
