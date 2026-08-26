@@ -2,9 +2,17 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 
 const ALGORITHM = "aes-256-gcm";
 
+function encryptionSecret() {
+  const secret = process.env.TOKEN_ENCRYPTION_KEY ?? process.env.NEXTAUTH_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("TOKEN_ENCRYPTION_KEY or NEXTAUTH_SECRET must be configured in production");
+  }
+  return "development-secret";
+}
+
 function key() {
-  const secret = process.env.TOKEN_ENCRYPTION_KEY ?? process.env.NEXTAUTH_SECRET ?? "development-secret";
-  return createHash("sha256").update(secret).digest();
+  return createHash("sha256").update(encryptionSecret()).digest();
 }
 
 export function encryptToken(token?: string | null) {

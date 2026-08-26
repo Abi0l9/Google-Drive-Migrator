@@ -11,11 +11,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Google Drive API key is not configured" }, { status: 500 });
   }
 
-  const clientIp = request.headers.get("x-forwarded-for") ?? "anonymous";
-  const quota = rateLimit(`analyze:${clientIp}`);
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const clientIp = forwardedFor || request.headers.get("x-real-ip")?.trim() || "anonymous";
+  const quota = await rateLimit(`analyze:${clientIp}`);
   if (!quota.allowed) return NextResponse.json({ error: "Too many analyze requests" }, { status: 429 });
+
   const parsed = AnalyzeRequest.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: "Invalid Google Drive Folder URL" }, { status: 400 });
+
   try {
     const analysis = await analyzePublicFolder(parsed.data.folderUrl);
     return NextResponse.json(analysis);

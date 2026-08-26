@@ -13,7 +13,7 @@ export const { handlers: { GET, POST }, auth, signIn, signOut } = NextAuth({
       clientSecret: env.googleClientSecret,
       authorization: {
         params: {
-          scope: "openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly",
+          scope: "openid email profile https://www.googleapis.com/auth/drive.file",
           access_type: "offline",
           prompt: "consent",
         },
@@ -22,34 +22,30 @@ export const { handlers: { GET, POST }, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, account }) {
-      if (account) {
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        if (token.email && account.access_token) {
-          await connectDb();
-          const encryptedRefreshToken = encryptToken(account.refresh_token);
-          await User.findOneAndUpdate(
-            { email: token.email },
-            {
-              $set: {
-                name: token.name ?? token.email,
-                email: token.email,
-                image: token.picture,
-                googleId: account.providerAccountId,
-                accessToken: encryptToken(account.access_token),
-                ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
-              },
-              ...(!encryptedRefreshToken ? { $setOnInsert: { refreshToken: "" } } : {}),
+      if (account && token.email && account.access_token) {
+        await connectDb();
+        const encryptedAccessToken = encryptToken(account.access_token);
+        const encryptedRefreshToken = encryptToken(account.refresh_token);
+        const accessTokenExpiresAt = account.expires_at ? new Date(account.expires_at * 1000) : undefined;
+
+        await User.findOneAndUpdate(
+          { email: token.email },
+          {
+            $set: {
+              name: token.name ?? token.email,
+              email: token.email,
+              image: token.picture,
+              googleId: account.providerAccountId,
+              accessToken: encryptedAccessToken,
+              ...(accessTokenExpiresAt ? { accessTokenExpiresAt } : {}),
+              ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
             },
-            { upsert: true, new: true },
-          );
-        }
+            ...(!encryptedRefreshToken ? { $setOnInsert: { refreshToken: "" } } : {}),
+          },
+          { upsert: true, new: true },
+        );
       }
       return token;
-    },
-    async session({ session, token }) {
-      session.accessToken = token.accessToken as string | undefined;
-      return session;
     },
   },
 });
