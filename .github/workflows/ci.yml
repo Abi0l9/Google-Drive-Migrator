@@ -9,7 +9,7 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -45,3 +45,9 @@ jobs:
           GOOGLE_CLIENT_SECRET: ci-google-client-secret
           MONGODB_URI: mongodb://127.0.0.1:27017/drive-migrator-ci
           REDIS_URL: redis://127.0.0.1:6379
+
+      - name: Build production web image
+        run: docker build --target production -t gdm-web-ci .
+
+      - name: Build production worker image
+        run: docker build --target worker -t gdm-worker-ci .
