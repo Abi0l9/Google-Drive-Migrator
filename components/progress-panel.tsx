@@ -34,7 +34,7 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   const [resuming, setResuming] = useState(false);
   const [transferRate, setTransferRate] = useState<number | undefined>();
   const [etaSeconds, setEtaSeconds] = useState<number | undefined>();
-  const transferSampleRef = useRef<TransferSample>();
+  const transferSampleRef = useRef<TransferSample | undefined>(undefined);
 
   const loadProgress = useCallback(async () => {
     try {
