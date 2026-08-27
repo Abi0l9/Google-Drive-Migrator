@@ -1,0 +1,82 @@
+name: Provision Cloudflare Runtime
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - .github/workflows/provision-cloudflare-runtime.yml
+
+permissions:
+  contents: write
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: feat/cloudflare-free-runtime
+
+      - name: Provision D1 and Queues
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json")
+          base="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}"
+
+          d1_json=$(curl -fsS "${base}/d1/database?name=gdm&per_page=100" "${auth[@]}")
+          db_id=$(jq -r '.result[] | select(.name == "gdm") | .uuid' <<<"$d1_json" | head -n1)
+          if [ -z "$db_id" ]; then
+            created=$(curl -fsS -X POST "${base}/d1/database" "${auth[@]}" --data '{"name":"gdm"}')
+            db_id=$(jq -r '.result.uuid' <<<"$created")
+          fi
+          test -n "$db_id"
+          echo "D1 database ready: gdm (${db_id})"
+
+          queues_json=$(curl -fsS "${base}/queues?per_page=100" "${auth[@]}")
+          for queue in gdm-jobs gdm-jobs-dlq; do
+            if ! jq -e --arg q "$queue" '.result[] | select(.queue_name == $q)' <<<"$queues_json" >/dev/null; then
+              curl -fsS -X POST "${base}/queues" "${auth[@]}" --data "{\"queue_name\":\"${queue}\"}" >/dev/null
+              echo "Created queue: ${queue}"
+            else
+              echo "Queue already exists: ${queue}"
+            fi
+          done
+
+          python3 - "$db_id" <<'PY'
+          import pathlib, sys
+          db_id = sys.argv[1]
+          for name in ("wrangler.jsonc", "wrangler.jobs.jsonc"):
+              path = pathlib.Path(name)
+              text = path.read_text()
+              text = text.replace("00000000-0000-0000-0000-000000000000", db_id)
+              path.write_text(text)
+          PY
+
+      - name: Apply D1 schema
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: 4.125.0
+          command: d1 migrations apply gdm --remote --config wrangler.jsonc
+
+      - name: Commit Cloudflare resource binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- wrangler.jsonc wrangler.jobs.jsonc; then
+            echo "Resource IDs already committed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- wrangler.jsonc wrangler.jobs.jsonc
+          git commit -m "Bind Cloudflare D1 runtime resources"
+          git push origin HEAD:feat/cloudflare-free-runtime
