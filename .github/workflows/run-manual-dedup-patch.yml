@@ -1,0 +1,86 @@
+name: Build Partial Destination Dedup
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - .github/workflows/run-manual-dedup-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOOGLE_API_KEY: AIza-ci-placeholder
+      GOOGLE_PICKER_API_KEY: AIza-ci-picker-placeholder
+      GOOGLE_CLOUD_PROJECT_NUMBER: "123456789012"
+      GOOGLE_CLIENT_ID: ci.apps.googleusercontent.com
+      GOOGLE_CLIENT_SECRET: ci-google-client-secret
+      NEXTAUTH_SECRET: ci-nextauth-secret-with-sufficient-length
+      NEXTAUTH_URL: https://gdm-web.realk9sh.workers.dev
+      TOKEN_ENCRYPTION_KEY: ci-token-encryption-key-with-sufficient-length
+      ADMIN_EMAILS: admin@example.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: feat/cloudflare-free-runtime
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Apply partial destination dedup implementation
+        run: python scripts/implement_manual_dedup.py
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Cloudflare binding types
+        run: |
+          npx wrangler@4.125.0 types --config wrangler.jsonc --env-interface CloudflareEnv cloudflare-env.d.ts
+          npx wrangler@4.125.0 types --config wrangler.jobs.jsonc --env-interface CloudflareJobsEnv cloudflare-jobs-env.d.ts
+
+      - name: Tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Next production build
+        run: npm run build
+
+      - name: OpenNext Cloudflare build
+        run: npm run cf:build
+
+      - name: Wrangler dry-run
+        run: npx wrangler@4.125.0 deploy --config wrangler.jsonc --dry-run --outdir .wrangler-dry
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Monsur Oyedeji"
+          git config user.email "102850720+Abi0l9@users.noreply.github.com"
+          git add -- \
+            cloudflare/migrations/0002_manual_destination_dedup.sql \
+            lib/cloudflare/manual-dedup.ts \
+            lib/google/selected-destination.ts \
+            tests/manual-dedup.test.ts \
+            components/analyzer-form.tsx \
+            app/api/migrations/route.ts \
+            cloudflare/jobs/worker.ts
+          git rm -- scripts/implement_manual_dedup.py .github/workflows/implement-manual-dedup.yml .github/workflows/run-manual-dedup-patch.yml
+          git commit -m "Support partially populated destination folders"
+          git push origin HEAD:feat/cloudflare-free-runtime
