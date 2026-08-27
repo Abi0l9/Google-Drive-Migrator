@@ -1,0 +1,38 @@
+name: Capture Live Auth Error
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - .github/workflows/tail-live-auth-error.yml
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Capture Worker tail while reproducing auth failure
+        shell: bash
+        run: |
+          set -u
+          npx wrangler@4.125.0 tail gdm-web --format=json > /tmp/gdm-tail.log 2>&1 &
+          tail_pid=$!
+          sleep 6
+          curl --silent --show-error "https://gdm-web.realk9sh.workers.dev/api/auth/providers" >/tmp/auth-body || true
+          sleep 6
+          kill "$tail_pid" 2>/dev/null || true
+          sleep 1
+          echo "===== auth body ====="
+          cat /tmp/auth-body || true
+          echo
+          echo "===== worker tail ====="
+          cat /tmp/gdm-tail.log || true
