@@ -74,6 +74,9 @@ jobs:
           base="https://gdm-web.realk9sh.workers.dev"
           curl --fail --silent --show-error --retry 5 --retry-delay 2 "$base/" >/tmp/gdm-home.html
           curl --fail --silent --show-error --retry 5 --retry-delay 2 "$base/api/health" >/tmp/gdm-health.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$base/api/auth/providers" >/tmp/gdm-auth-providers.json
           grep -q "Drive Migrator" /tmp/gdm-home.html
+          grep -q '"google"' /tmp/gdm-auth-providers.json
           cat /tmp/gdm-health.json
-          echo "gdm-web production smoke test passed"
+          cat /tmp/gdm-auth-providers.json
+          echo "gdm-web production smoke test passed, including Auth.js provider configuration"
