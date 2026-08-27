@@ -1,60 +1,72 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { connectDb } from "@/lib/db";
-import { getRetryQueue, getScanQueue } from "@/lib/queue/migrations";
-import { Migration } from "@/models/migration";
-import { User } from "@/models/user";
-
-interface UserIdRecord {
-  _id: { toString(): string };
-}
+import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
+import { getMigrationForUser, getUserByEmail, setMigrationStatus } from "@/lib/cloudflare/d1";
+import { FreeTierCapacityError, nextUtcReset } from "@/lib/cloudflare/free-tier";
+import { publishMigrationJob, publishMigrationJobs } from "@/lib/cloudflare/queue";
 
 const alreadyActiveStatuses = new Set(["pending", "scanning", "running"]);
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session?.user?.email) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  }
 
-  await connectDb();
+  const cloudflare = getGdmCloudflareEnv();
   const { id } = await params;
-  const user = await User.findOne({ email: session.user.email }).select("_id").lean<UserIdRecord>();
+  const user = await getUserByEmail(cloudflare.DB, session.user.email);
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
-  const migration = await Migration.findById(id);
-  if (!migration || migration.userId.toString() !== user._id.toString()) {
-    return NextResponse.json({ error: "Migration not found" }, { status: 404 });
-  }
-
-  if (alreadyActiveStatuses.has(migration.status)) {
-    return NextResponse.json({ status: migration.status });
-  }
-
+  const migration = await getMigrationForUser(cloudflare.DB, id, user.id);
+  if (!migration) return NextResponse.json({ error: "Migration not found" }, { status: 404 });
+  if (alreadyActiveStatuses.has(migration.status)) return NextResponse.json({ status: migration.status });
   if (migration.status !== "paused") {
     return NextResponse.json({ error: `A ${migration.status} migration cannot be resumed` }, { status: 409 });
   }
 
   const scanCompleted = Boolean(migration.scanCompleted);
-  migration.status = scanCompleted ? "running" : "pending";
-  migration.completedAt = undefined;
-  migration.errorMessage = undefined;
-  await migration.save();
+  const resumedStatus = scanCompleted ? "running" : "scanning";
+  await cloudflare.DB.batch([
+    cloudflare.DB.prepare(`
+      UPDATE migrations
+      SET status = ?, completed_at = NULL, error_message = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ? AND status = 'paused'
+    `).bind(resumedStatus, id, user.id),
+    cloudflare.DB.prepare(`
+      UPDATE migration_items
+      SET status = 'pending', transfer_job_id = NULL, transfer_lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE migration_id = ? AND status = 'copying'
+    `).bind(id),
+  ]);
 
   try {
     if (scanCompleted) {
-      await getRetryQueue().add(
-        "resume-migration",
-        { migrationId: migration._id.toString() },
-        { delay: 1500 },
-      );
+      await publishMigrationJob(cloudflare, { type: "dispatch-pending", migrationId: id });
     } else {
-      await getScanQueue().add("resume-scan", { migrationId: migration._id.toString() });
+      await publishMigrationJobs(cloudflare, [
+        {
+          type: "scan-folder",
+          migrationId: id,
+          sourceFolderId: migration.sourceFolderId,
+          sourceName: migration.sourceFolderName,
+          sourcePath: migration.sourceFolderName,
+          destinationFolderId: migration.destinationFolderId,
+        },
+        { type: "dispatch-pending", migrationId: id },
+      ]);
     }
   } catch (error) {
-    migration.status = "paused";
-    migration.errorMessage = error instanceof Error ? error.message : "Migration queue unavailable";
-    await migration.save();
+    const message = error instanceof Error ? error.message : "Migration queue unavailable";
+    await setMigrationStatus(cloudflare.DB, id, "paused", { errorMessage: message });
+    if (error instanceof FreeTierCapacityError) {
+      return NextResponse.json(
+        { error: message, status: "paused", resumesAfter: nextUtcReset(), zeroCostMode: true },
+        { status: 429 },
+      );
+    }
     return NextResponse.json({ error: "Migration queue is unavailable. Try again shortly." }, { status: 503 });
   }
 
-  return NextResponse.json({ status: migration.status, scanCompleted });
+  return NextResponse.json({ status: resumedStatus, scanCompleted });
 }
