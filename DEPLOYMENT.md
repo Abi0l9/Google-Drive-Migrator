@@ -49,15 +49,19 @@ NEXTAUTH_URL=https://your-domain.example
 TOKEN_ENCRYPTION_KEY=
 ADMIN_EMAILS=admin@example.com
 MAX_ACTIVE_MIGRATIONS_PER_USER=3
+MAX_MONTHLY_TRANSFER_BYTES_PER_USER=107374182400
+MAX_MONTHLY_TRANSFER_FILES_PER_USER=100000
 ```
 
-`GOOGLE_PICKER_API_KEY`, `NEXTAUTH_URL`, `ADMIN_EMAILS`, and `MAX_ACTIVE_MIGRATIONS_PER_USER` are primarily web concerns, but keeping one shared environment definition is acceptable.
+`GOOGLE_PICKER_API_KEY`, `NEXTAUTH_URL`, `ADMIN_EMAILS`, `MAX_ACTIVE_MIGRATIONS_PER_USER`, and the monthly transfer quota values are primarily web concerns, but keeping one shared environment definition is acceptable.
 
 `MAX_ACTIVE_MIGRATIONS_PER_USER` defaults to `3` when omitted or invalid. Pending, scanning, running, and paused migrations count as active. A repeated request for the same source and destination reuses its existing active migration before the active-migration cap is evaluated.
 
+`MAX_MONTHLY_TRANSFER_BYTES_PER_USER` defaults to 100 GiB (`107374182400` bytes) and `MAX_MONTHLY_TRANSFER_FILES_PER_USER` defaults to `100000`. GDM reserves both dimensions when a short-lived, server-signed folder analysis is accepted for a new migration. The counters are grouped by UTC calendar month. A migration that cannot be queued immediately releases its reservation.
+
 ### Encryption-key rule
 
-`TOKEN_ENCRYPTION_KEY` must be stable and identical across every web and worker instance. Rotating it without a migration strategy makes stored Google tokens and resumable-upload session URLs unreadable.
+`TOKEN_ENCRYPTION_KEY` must be stable and identical across every web and worker instance. Rotating it without a migration strategy makes stored Google tokens and resumable-upload session URLs unreadable. Web replicas also use it to authenticate the short-lived analysis proof returned by `/api/analyze`, so mixed keys across web instances will cause otherwise valid analyses to be rejected when a migration is started.
 
 ## Google OAuth production callback
 
@@ -89,7 +93,7 @@ The production web Docker stage includes a container `HEALTHCHECK` against `/api
 
 ### Web
 
-Multiple web instances can share the same MongoDB and Redis services. Auth.js secrets and token-encryption keys must be identical across instances. API request throttling uses Redis-backed counters so limits are shared across replicas, with a process-local fallback during Redis failure.
+Multiple web instances can share the same MongoDB and Redis services. Auth.js secrets and token-encryption keys must be identical across instances. API request throttling uses Redis-backed counters so limits are shared across replicas, with a process-local fallback during Redis failure. Migration creation is serialized per user through a Redis lock, which also makes monthly quota reservation safe across web replicas.
 
 ### Worker
 
@@ -108,6 +112,7 @@ Start with conservative worker counts because Google Drive quotas apply to the p
 7. Sign in, choose a destination with Picker, and run a small migration before testing large/resumable files.
 8. Add an operator email to `ADMIN_EMAILS` and verify `/admin` queue and worker health.
 9. Test CSV/JSON report download after a completed migration.
+10. Confirm the active and monthly quota values match the capacity you intend to offer users.
 
 ## Rollback considerations
 
@@ -120,5 +125,8 @@ In particular, current migrations can contain:
 - `encryptedUploadSessionUrl`
 - `transferJobId`
 - `transferLeaseUntil`
+- `quotaPeriod`
+- `quotaChargedBytes`
+- `quotaChargedFiles`
 
-Older code that does not understand these fields may lose pause/resume or crash-recovery behavior even though MongoDB retains the data.
+Older code that does not understand these fields may lose pause/resume, crash-recovery, or quota-accounting behavior even though MongoDB retains the data.
