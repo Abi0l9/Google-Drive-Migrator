@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
-import { getReportQueue, getTransferQueue } from "@/lib/queue/migrations";
-import { Migration } from "@/models/migration";
-import { MigrationItem } from "@/models/migration-item";
+import {
+  GOOGLE_REAUTH_REQUIRED,
+  isGoogleReauthorizationRequiredError,
+} from "@/lib/google/auth-errors";
+import { retryMigrationForUser } from "@/lib/migration/controls";
 import { User } from "@/models/user";
 
 interface UserIdRecord {
@@ -19,53 +21,30 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   const user = await User.findOne({ email: session.user.email }).select("_id").lean<UserIdRecord>();
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
-  const migration = await Migration.findById(id);
-  if (!migration || migration.userId.toString() !== user._id.toString()) {
-    return NextResponse.json({ error: "Migration not found" }, { status: 404 });
-  }
-
-  const failedItems = await MigrationItem.find({
-    migrationId: migration._id,
-    itemType: "file",
-    status: "failed",
-  }).select("_id");
-
-  if (!failedItems.length) {
-    return NextResponse.json({ retried: 0, status: migration.status });
-  }
-
-  const failedIds = failedItems.map((item) => item._id);
-
-  await MigrationItem.updateMany(
-    { _id: { $in: failedIds } },
-    { $set: { status: "pending", retryCount: 0 }, $unset: { errorMessage: "" } },
-  );
-
-  migration.status = "running";
-  migration.completedAt = undefined;
-  migration.errorMessage = undefined;
-  await migration.save();
-
   try {
-    await getTransferQueue().addBulk(
-      failedItems.map((item) => ({
-        name: "retry-transfer-file",
-        data: { migrationId: migration._id.toString(), itemId: item._id.toString() },
-      })),
-    );
-    await getReportQueue().add("refresh-report", { migrationId: migration._id.toString() });
+    const result = await retryMigrationForUser(user._id.toString(), id);
+    if (result.outcome === "not_found") {
+      return NextResponse.json({ error: "Migration not found" }, { status: 404 });
+    }
+    if (result.outcome === "conflict") {
+      return NextResponse.json({ error: `A ${result.status} migration cannot be retried` }, { status: 409 });
+    }
+    if (result.outcome === "queue_unavailable") {
+      return NextResponse.json({ error: "Migration queue is unavailable. Try again shortly." }, { status: 503 });
+    }
+
+    return NextResponse.json({ retried: result.retried ?? 0, status: result.status });
   } catch (error) {
-    await MigrationItem.updateMany(
-      { _id: { $in: failedIds }, status: "pending" },
-      { $set: { status: "failed", errorMessage: "Retry queue unavailable" } },
+    if (isGoogleReauthorizationRequiredError(error)) {
+      return NextResponse.json(
+        { error: error.message, code: GOOGLE_REAUTH_REQUIRED },
+        { status: 403 },
+      );
+    }
+
+    return NextResponse.json(
+      { error: "Unable to verify Google Drive authorization. Try again shortly." },
+      { status: 503 },
     );
-    migration.status = "failed";
-    migration.errorMessage = error instanceof Error ? error.message : "Retry queue unavailable";
-    migration.completedAt = new Date();
-    await migration.save();
-
-    return NextResponse.json({ error: "Migration queue is unavailable. Try again shortly." }, { status: 503 });
   }
-
-  return NextResponse.json({ retried: failedItems.length, status: migration.status });
 }
