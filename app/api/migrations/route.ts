@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
 import { env } from "@/lib/env";
+import { formatBytes } from "@/lib/format";
 import {
   GOOGLE_REAUTH_REQUIRED,
   GoogleReauthorizationRequiredError,
@@ -10,7 +11,14 @@ import {
 } from "@/lib/google/auth-errors";
 import { extractDriveFolderId, userDrive, validateDestinationFolder } from "@/lib/google/drive";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
-import { canCreateActiveMigration } from "@/lib/migration/quota";
+import { verifyAnalysisProof } from "@/lib/migration/analysis-proof";
+import {
+  canCreateActiveMigration,
+  canReserveMonthlyUsage,
+  usagePeriodFor,
+  type MonthlyUsage,
+  type MonthlyUsageLimits,
+} from "@/lib/migration/quota";
 import {
   getScanQueue,
   MigrationCreationLockBusyError,
@@ -23,7 +31,7 @@ import { User } from "@/models/user";
 const CreateMigration = z.object({
   sourceFolderId: z.string().min(1),
   sourceFolderUrl: z.string().url(),
-  sourceFolderName: z.string().min(1),
+  analysisToken: z.string().min(1).max(4096),
   destinationFolderRef: z.string().min(1).max(2048),
 });
 
@@ -33,6 +41,17 @@ class ActiveMigrationQuotaError extends Error {
   constructor(public activeCount: number, public maxActive: number) {
     super("Active migration quota reached");
     this.name = "ActiveMigrationQuotaError";
+  }
+}
+
+class MonthlyUsageQuotaError extends Error {
+  constructor(
+    public current: MonthlyUsage,
+    public requested: MonthlyUsage,
+    public limits: MonthlyUsageLimits,
+  ) {
+    super("Monthly migration usage quota reached");
+    this.name = "MonthlyUsageQuotaError";
   }
 }
 
@@ -51,6 +70,14 @@ export async function POST(request: Request) {
   }
   if (sourceFolderId !== parsed.data.sourceFolderId) {
     return NextResponse.json({ error: "Source folder does not match the analyzed folder" }, { status: 400 });
+  }
+
+  const analysis = verifyAnalysisProof(parsed.data.analysisToken, sourceFolderId);
+  if (!analysis) {
+    return NextResponse.json(
+      { error: "Folder analysis expired or changed. Analyze the source folder again before starting the migration." },
+      { status: 409 },
+    );
   }
 
   await connectDb();
@@ -86,7 +113,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const existingMigration = await findExistingActiveMigration(user._id, parsed.data.sourceFolderId, destination.id);
+  const existingMigration = await findExistingActiveMigration(user._id, sourceFolderId, destination.id);
   if (existingMigration) {
     return NextResponse.json({
       migrationId: existingMigration._id.toString(),
@@ -98,7 +125,7 @@ export async function POST(request: Request) {
   let creation: { migration: InstanceType<typeof Migration>; reused: boolean };
   try {
     creation = await withMigrationCreationLock(user._id.toString(), async () => {
-      const lockedExisting = await findExistingActiveMigration(user._id, parsed.data.sourceFolderId, destination.id);
+      const lockedExisting = await findExistingActiveMigration(user._id, sourceFolderId, destination.id);
       if (lockedExisting) return { migration: lockedExisting, reused: true };
 
       const activeMigrationCount = await Migration.countDocuments({
@@ -110,14 +137,48 @@ export async function POST(request: Request) {
         throw new ActiveMigrationQuotaError(activeMigrationCount, env.maxActiveMigrationsPerUser);
       }
 
+      const quotaPeriod = usagePeriodFor();
+      const [usage] = await Migration.aggregate<{ bytes: number; files: number }>([
+        { $match: { userId: user._id, quotaPeriod } },
+        {
+          $group: {
+            _id: null,
+            bytes: { $sum: "$quotaChargedBytes" },
+            files: { $sum: "$quotaChargedFiles" },
+          },
+        },
+      ]);
+
+      const currentUsage: MonthlyUsage = {
+        bytes: usage?.bytes ?? 0,
+        files: usage?.files ?? 0,
+      };
+      const requestedUsage: MonthlyUsage = {
+        bytes: analysis.size,
+        files: analysis.files,
+      };
+      const monthlyLimits: MonthlyUsageLimits = {
+        bytes: env.maxMonthlyTransferBytesPerUser,
+        files: env.maxMonthlyTransferFilesPerUser,
+      };
+
+      if (!canReserveMonthlyUsage(currentUsage, requestedUsage, monthlyLimits)) {
+        throw new MonthlyUsageQuotaError(currentUsage, requestedUsage, monthlyLimits);
+      }
+
       const migration = await Migration.create({
-        sourceFolderId: parsed.data.sourceFolderId,
+        sourceFolderId,
         sourceFolderUrl: parsed.data.sourceFolderUrl,
-        sourceFolderName: parsed.data.sourceFolderName,
+        sourceFolderName: analysis.folderName,
         destinationFolderId: destination.id,
         destinationFolderName: destination.name,
         userId: user._id,
         status: "pending",
+        totalFiles: analysis.files,
+        totalBytes: analysis.size,
+        quotaPeriod,
+        quotaChargedBytes: analysis.size,
+        quotaChargedFiles: analysis.files,
       });
 
       return { migration, reused: false };
@@ -128,6 +189,26 @@ export async function POST(request: Request) {
         {
           error: `You already have ${error.activeCount} active migrations. Finish, cancel, or wait for one to complete before starting another.`,
           maxActiveMigrations: error.maxActive,
+        },
+        { status: 429 },
+      );
+    }
+
+    if (error instanceof MonthlyUsageQuotaError) {
+      const byteLimitExceeded = error.current.bytes + error.requested.bytes > error.limits.bytes;
+      const fileLimitExceeded = error.current.files + error.requested.files > error.limits.files;
+      const exceeded = [
+        byteLimitExceeded ? `${formatBytes(error.limits.bytes)} of migration data` : null,
+        fileLimitExceeded ? `${error.limits.files.toLocaleString()} files` : null,
+      ].filter(Boolean).join(" and ");
+
+      return NextResponse.json(
+        {
+          error: `This migration would exceed your monthly GDM allowance of ${exceeded}. Your allowance resets at the start of the next UTC month.`,
+          code: "MONTHLY_USAGE_QUOTA_REACHED",
+          usage: error.current,
+          requested: error.requested,
+          limits: error.limits,
         },
         { status: 429 },
       );
@@ -157,6 +238,9 @@ export async function POST(request: Request) {
   } catch (error) {
     migration.status = "failed";
     migration.errorMessage = error instanceof Error ? error.message : "Redis queue unavailable";
+    migration.quotaPeriod = undefined;
+    migration.quotaChargedBytes = 0;
+    migration.quotaChargedFiles = 0;
     await migration.save();
     return NextResponse.json({ error: "Migration queue is unavailable. Try again shortly." }, { status: 503 });
   }
