@@ -21,6 +21,8 @@ Status legend:
 ## 2. Public folder analyzer
 
 - [x] Public Google Drive folder URL input
+- [x] Source requirement/helper copy and accessible error announcements
+- [x] Clear analyzed state when the source URL changes
 - [x] `/folders/:id` and `?id=` folder ID parsing
 - [x] Restrict source URLs to `drive.google.com`
 - [x] Validate source folder and public accessibility
@@ -49,13 +51,14 @@ Status legend:
 ## 4. Destination selection
 
 - [x] My Drive root option
-- [x] Existing folder URL/ID fallback
+- [x] Picker-only selection for existing destination folders
 - [x] Server-side destination folder validation
 - [x] Validate ability to add children
 - [x] Google Picker folder selection
 - [x] Picker support for Shared Drives
 - [x] Separate browser API key and Cloud project App ID configuration
 - [x] Picker bootstrap token delivered only on demand with `no-store`
+- [x] Destination preview before migration starts
 - [ ] Create-new-destination-folder control before migration
 - [ ] Remember recent destinations per user
 
