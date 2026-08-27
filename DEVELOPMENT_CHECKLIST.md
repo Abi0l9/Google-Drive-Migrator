@@ -45,7 +45,9 @@ Status legend:
 - [x] Keep provider access tokens out of the normal browser session
 - [x] Auth ownership checks on migration reads/actions
 - [x] Sign-in/sign-out UI
-- [~] Reauthentication UX when a refresh token is revoked or missing
+- [x] Reauthentication UX when a refresh token is revoked, expired, or missing
+- [x] Picker and migration-start APIs return an explicit reconnect-required state
+- [x] Failed migrations surface a direct reconnect action before retry
 - [ ] Dedicated token-rotation/credential invalidation operations guide
 
 ## 4. Destination selection
@@ -162,6 +164,7 @@ Status legend:
 - [x] Distinguish retryable vs permanent Google API errors
 - [x] Retry rate limits, 429, transient network failures, and Google 5xx failures
 - [x] Stop retrying permission/not-found/auth/invalid-request failures
+- [x] Map revoked/expired OAuth credentials to actionable reconnect errors
 - [x] Stop retrying unsupported Drive item types
 - [x] Use BullMQ `UnrecoverableError` for permanent failures
 - [x] Resumable-session 404/410 recovery
@@ -190,10 +193,10 @@ Status legend:
 - [x] Authenticated recent migration history
 - [x] Links back to migration detail/progress
 - [x] Completed/failed file summary cards
+- [x] Destination shortcut/open-in-Drive action
 - [ ] Pagination beyond latest migrations
 - [ ] Filters by status/date
 - [ ] Search by source folder
-- [ ] Destination shortcut/open-in-Drive action
 
 ## 13. Admin and operations
 
@@ -218,6 +221,7 @@ Status legend:
 - [x] Drive URL parser tests
 - [x] Drive item support-policy tests
 - [x] Google error-classification tests
+- [x] Google OAuth reconnect-detection tests
 - [x] Resumable threshold tests
 - [x] Resumable Range-offset parser tests
 - [x] Rate-limiter local fallback tests
