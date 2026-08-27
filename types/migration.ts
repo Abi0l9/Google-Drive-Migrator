@@ -8,6 +8,9 @@ export interface FolderAnalysis {
   files: number;
   folders: number;
   size: number;
+}
+
+export interface SignedFolderAnalysis extends FolderAnalysis {
   analysisToken: string;
 }
 
