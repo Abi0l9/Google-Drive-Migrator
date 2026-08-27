@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
-import { Migration } from "@/models/migration";
-import { MigrationItem } from "@/models/migration-item";
+import { cancelMigrationForUser } from "@/lib/migration/controls";
 import { User } from "@/models/user";
 
 interface UserIdRecord {
   _id: { toString(): string };
 }
-
-const cancellableStatuses = new Set(["pending", "scanning", "running", "paused"]);
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -20,28 +17,16 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   const user = await User.findOne({ email: session.user.email }).select("_id").lean<UserIdRecord>();
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
-  const migration = await Migration.findById(id);
-  if (!migration || migration.userId.toString() !== user._id.toString()) {
+  const result = await cancelMigrationForUser(user._id.toString(), id);
+  if (result.outcome === "not_found") {
     return NextResponse.json({ error: "Migration not found" }, { status: 404 });
   }
-
-  if (migration.status === "cancelled") {
-    return NextResponse.json({ status: migration.status });
+  if (result.outcome === "conflict") {
+    return NextResponse.json({ error: `A ${result.status} migration cannot be cancelled` }, { status: 409 });
+  }
+  if (result.outcome === "queue_unavailable") {
+    return NextResponse.json({ error: "Migration queue is unavailable. Try again shortly." }, { status: 503 });
   }
 
-  if (!cancellableStatuses.has(migration.status)) {
-    return NextResponse.json({ error: `A ${migration.status} migration cannot be cancelled` }, { status: 409 });
-  }
-
-  migration.status = "cancelled";
-  migration.completedAt = new Date();
-  migration.errorMessage = undefined;
-  await migration.save();
-
-  await MigrationItem.updateMany(
-    { migrationId: migration._id, itemType: "file", status: "pending" },
-    { $set: { status: "skipped", errorMessage: "Migration cancelled" } },
-  );
-
-  return NextResponse.json({ status: migration.status });
+  return NextResponse.json({ status: result.status });
 }
