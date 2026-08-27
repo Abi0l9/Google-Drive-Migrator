@@ -60,19 +60,6 @@
       }
     }
   ],
-  "secrets": {
-    "required": [
-      "GOOGLE_API_KEY",
-      "GOOGLE_PICKER_API_KEY",
-      "GOOGLE_CLOUD_PROJECT_NUMBER",
-      "GOOGLE_CLIENT_ID",
-      "GOOGLE_CLIENT_SECRET",
-      "NEXTAUTH_SECRET",
-      "TOKEN_ENCRYPTION_KEY",
-      "NEXTAUTH_URL",
-      "ADMIN_EMAILS"
-    ]
-  },
   "vars": {
     "GDM_ZERO_COST_MODE": "true",
     "GDM_DAILY_QUEUE_MESSAGE_BUDGET": "2200",
