@@ -1,12 +1,9 @@
-import { isValidObjectId } from "mongoose";
 import { auth } from "@/auth";
 import { SignInButton } from "@/components/auth-actions";
 import { ProgressPanel } from "@/components/progress-panel";
 import { Card } from "@/components/ui";
-import { connectDb } from "@/lib/db";
-import { isGoogleOAuthConfigured } from "@/lib/env";
-import { Migration } from "@/models/migration";
-import { User } from "@/models/user";
+import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
+import { getMigrationForUser, getUserByEmail } from "@/lib/cloudflare/d1";
 
 interface MigrationPageProps {
   params: Promise<{ id: string }>;
@@ -16,15 +13,17 @@ const reportStatuses = new Set(["completed", "failed", "cancelled"]);
 
 export default async function MigrationPage({ params }: MigrationPageProps) {
   const session = await auth();
-  const googleOAuthConfigured = isGoogleOAuthConfigured();
+  const cloudflare = getGdmCloudflareEnv();
+  const googleOAuthConfigured =
+    cloudflare.GOOGLE_CLIENT_ID?.endsWith(".apps.googleusercontent.com") &&
+    Boolean(cloudflare.GOOGLE_CLIENT_SECRET);
   const { id } = await params;
   let reportAvailable = false;
 
-  if (session?.user?.email && isValidObjectId(id)) {
-    await connectDb();
-    const user = await User.findOne({ email: session.user.email }).select("_id").lean<{ _id: unknown }>();
+  if (session?.user?.email) {
+    const user = await getUserByEmail(cloudflare.DB, session.user.email);
     if (user) {
-      const migration = await Migration.findOne({ _id: id, userId: user._id }).select("status").lean<{ status?: string }>();
+      const migration = await getMigrationForUser(cloudflare.DB, id, user.id);
       reportAvailable = Boolean(migration?.status && reportStatuses.has(migration.status));
     }
   }
