@@ -5,6 +5,18 @@ import mongoose from "mongoose";
 
 const integrationEnabled = process.env.GDM_INTEGRATION_TESTS === "1";
 
+interface MigrationStateRecord {
+  status?: string;
+  completedAt?: Date;
+  errorMessage?: string;
+}
+
+interface MigrationItemStateRecord {
+  status?: string;
+  retryCount?: number;
+  errorMessage?: string;
+}
+
 test("migration controls preserve ownership, lifecycle, queues, and Google reconnect safety", {
   skip: !integrationEnabled,
   timeout: 25_000,
@@ -92,7 +104,8 @@ test("migration controls preserve ownership, lifecycle, queues, and Google recon
 
     const paused = await controls.pauseMigrationForUser(user._id.toString(), migration._id.toString());
     assert.deepEqual(paused, { outcome: "ok", status: "paused" });
-    assert.equal((await Migration.findById(migration._id).lean())?.status, "paused");
+    const pausedMigration = await Migration.findById(migration._id).lean<MigrationStateRecord>();
+    assert.equal(pausedMigration?.status, "paused");
 
     const resumed = await controls.resumeMigrationForUser(user._id.toString(), migration._id.toString());
     assert.equal(resumed.outcome, "ok");
@@ -105,8 +118,8 @@ test("migration controls preserve ownership, lifecycle, queues, and Google recon
 
     const cancelled = await controls.cancelMigrationForUser(user._id.toString(), migration._id.toString());
     assert.deepEqual(cancelled, { outcome: "ok", status: "cancelled" });
-    const cancelledMigration = await Migration.findById(migration._id).lean();
-    const skippedItem = await MigrationItem.findById(pendingItem._id).lean();
+    const cancelledMigration = await Migration.findById(migration._id).lean<MigrationStateRecord>();
+    const skippedItem = await MigrationItem.findById(pendingItem._id).lean<MigrationItemStateRecord>();
     assert.equal(cancelledMigration?.status, "cancelled");
     assert.ok(cancelledMigration?.completedAt);
     assert.equal(skippedItem?.status, "skipped");
@@ -144,8 +157,8 @@ test("migration controls preserve ownership, lifecycle, queues, and Google recon
     assert.equal(retried.retried, 1);
     assert.equal(retried.status, "running");
 
-    const retriedMigration = await Migration.findById(retryMigration._id).lean();
-    const retriedItem = await MigrationItem.findById(failedItem._id).lean();
+    const retriedMigration = await Migration.findById(retryMigration._id).lean<MigrationStateRecord>();
+    const retriedItem = await MigrationItem.findById(failedItem._id).lean<MigrationItemStateRecord>();
     assert.equal(retriedMigration?.status, "running");
     assert.equal(retriedItem?.status, "pending");
     assert.equal(retriedItem?.retryCount, 0);
@@ -198,8 +211,8 @@ test("migration controls preserve ownership, lifecycle, queues, and Google recon
       (error: unknown) => isGoogleReauthorizationRequiredError(error),
     );
 
-    const reconnectAfter = await Migration.findById(reconnectMigration._id).lean();
-    const reconnectItemAfter = await MigrationItem.findById(reconnectItem._id).lean();
+    const reconnectAfter = await Migration.findById(reconnectMigration._id).lean<MigrationStateRecord>();
+    const reconnectItemAfter = await MigrationItem.findById(reconnectItem._id).lean<MigrationItemStateRecord>();
     assert.equal(reconnectAfter?.status, "failed");
     assert.ok(reconnectAfter?.completedAt);
     assert.equal(reconnectItemAfter?.status, "failed");
