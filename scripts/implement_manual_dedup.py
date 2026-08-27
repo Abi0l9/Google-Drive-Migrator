@@ -1,0 +1,697 @@
+from pathlib import Path
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    file_path = Path(path)
+    text = file_path.read_text()
+    if old not in text:
+        raise SystemExit(f"Expected patch anchor not found in {path}: {old[:140]!r}")
+    file_path.write_text(text.replace(old, new, 1))
+
+
+Path("cloudflare/migrations/0002_manual_destination_dedup.sql").write_text(r'''PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS migration_manual_options (
+  migration_id TEXT PRIMARY KEY,
+  merge_into_destination INTEGER NOT NULL DEFAULT 0 CHECK (merge_into_destination IN (0,1)),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS migration_existing_items (
+  id TEXT PRIMARY KEY,
+  migration_id TEXT NOT NULL,
+  destination_file_id TEXT NOT NULL,
+  parent_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE,
+  UNIQUE (migration_id, destination_file_id)
+);
+
+CREATE INDEX IF NOT EXISTS migration_existing_items_lookup_idx
+  ON migration_existing_items(migration_id, parent_id, name);
+''')
+
+Path("lib/cloudflare/manual-dedup.ts").write_text(r'''export interface SelectedDestinationItem {
+  id: string;
+  parentId: string;
+  name: string;
+  mimeType: string;
+  size?: number | null;
+}
+
+export interface ManualDuplicateLookup {
+  name: string;
+  mimeType?: string;
+  size?: number;
+}
+
+export function buildManualDuplicateLookup(input: {
+  name: string;
+  size: number;
+  workspaceMimeType?: string;
+}): ManualDuplicateLookup {
+  if (input.workspaceMimeType) {
+    return { name: input.name, mimeType: input.workspaceMimeType };
+  }
+  return { name: input.name, size: Math.max(0, Math.floor(input.size)) };
+}
+
+export async function saveManualDedupSelection(
+  db: D1Database,
+  migrationId: string,
+  mergeIntoDestination: boolean,
+  items: SelectedDestinationItem[],
+) {
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`
+      INSERT INTO migration_manual_options (migration_id, merge_into_destination, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(migration_id) DO UPDATE SET
+        merge_into_destination = excluded.merge_into_destination,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(migrationId, mergeIntoDestination ? 1 : 0),
+    db.prepare(`DELETE FROM migration_existing_items WHERE migration_id = ?`).bind(migrationId),
+  ];
+
+  for (const item of items) {
+    statements.push(
+      db.prepare(`
+        INSERT INTO migration_existing_items (
+          id, migration_id, destination_file_id, parent_id, name, mime_type, size
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(migration_id, destination_file_id) DO UPDATE SET
+          parent_id = excluded.parent_id,
+          name = excluded.name,
+          mime_type = excluded.mime_type,
+          size = excluded.size
+      `).bind(
+        crypto.randomUUID(),
+        migrationId,
+        item.id,
+        item.parentId,
+        item.name,
+        item.mimeType,
+        item.size == null ? null : Math.max(0, Math.floor(item.size)),
+      ),
+    );
+  }
+
+  await db.batch(statements);
+}
+
+export async function getManualDedupOptions(db: D1Database, migrationId: string) {
+  const row = await db.prepare(`
+    SELECT merge_into_destination AS mergeIntoDestination
+    FROM migration_manual_options
+    WHERE migration_id = ?
+    LIMIT 1
+  `).bind(migrationId).first<{ mergeIntoDestination: number }>();
+
+  return { mergeIntoDestination: Boolean(row?.mergeIntoDestination) };
+}
+
+export async function findSelectedDestinationItem(
+  db: D1Database,
+  migrationId: string,
+  parentId: string,
+  lookup: ManualDuplicateLookup,
+) {
+  let sql = `
+    SELECT
+      destination_file_id AS destinationFileId,
+      parent_id AS parentId,
+      name,
+      mime_type AS mimeType,
+      size
+    FROM migration_existing_items
+    WHERE migration_id = ? AND parent_id = ? AND name = ?
+  `;
+  const bindings: Array<string | number> = [migrationId, parentId, lookup.name];
+
+  if (lookup.mimeType) {
+    sql += ` AND mime_type = ?`;
+    bindings.push(lookup.mimeType);
+  }
+  if (lookup.size !== undefined) {
+    sql += ` AND size = ?`;
+    bindings.push(lookup.size);
+  }
+  sql += ` ORDER BY created_at ASC LIMIT 1`;
+
+  return db.prepare(sql).bind(...bindings).first<{
+    destinationFileId: string;
+    parentId: string;
+    name: string;
+    mimeType: string;
+    size?: number | null;
+  }>();
+}
+''')
+
+Path("lib/google/selected-destination.ts").write_text(r'''export interface AuthorizedDestinationItem {
+  id: string;
+  parentId: string;
+  name: string;
+  mimeType: string;
+  size?: number | null;
+}
+
+interface DriveMetadataResponse {
+  id?: string;
+  name?: string;
+  mimeType?: string;
+  size?: string;
+  parents?: string[];
+}
+
+export async function getAuthorizedDestinationItem(
+  accessToken: string,
+  fileId: string,
+): Promise<AuthorizedDestinationItem> {
+  const url = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`);
+  url.searchParams.set("fields", "id,name,mimeType,size,parents");
+  url.searchParams.set("supportsAllDrives", "true");
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to verify already-copied Drive item (${response.status})`);
+  }
+
+  const item = await response.json() as DriveMetadataResponse;
+  const id = item.id?.trim();
+  const name = item.name?.trim();
+  const mimeType = item.mimeType?.trim();
+  const parentId = item.parents?.[0]?.trim();
+  if (!id || !name || !mimeType || !parentId) {
+    throw new Error("An already-copied Drive item is missing required metadata");
+  }
+
+  return {
+    id,
+    parentId,
+    name,
+    mimeType,
+    size: item.size == null ? null : Math.max(0, Number(item.size) || 0),
+  };
+}
+''')
+
+Path("tests/manual-dedup.test.ts").write_text(r'''import assert from "node:assert/strict";
+import test from "node:test";
+import { buildManualDuplicateLookup } from "../lib/cloudflare/manual-dedup";
+
+test("ordinary manually selected files require exact name and size", () => {
+  assert.deepEqual(
+    buildManualDuplicateLookup({ name: "archive.zip", size: 8192 }),
+    { name: "archive.zip", size: 8192 },
+  );
+});
+
+test("Workspace exports use the selected Office file name and MIME type", () => {
+  assert.deepEqual(
+    buildManualDuplicateLookup({
+      name: "Budget.xlsx",
+      size: 0,
+      workspaceMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    {
+      name: "Budget.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
+  );
+});
+''')
+
+# Picker types/state.
+replace_once(
+    "components/analyzer-form.tsx",
+    "  setEnableDrives(enabled: boolean): PickerView;\n}",
+    "  setEnableDrives(enabled: boolean): PickerView;\n  setParent(parentId: string): PickerView;\n}",
+)
+replace_once(
+    "components/analyzer-form.tsx",
+    "  const [pickedDestinationName, setPickedDestinationName] = useState<string | null>(null);\n  const [error, setError] = useState<string | null>(null);",
+    "  const [pickedDestinationName, setPickedDestinationName] = useState<string | null>(null);\n  const [mergeIntoDestination, setMergeIntoDestination] = useState(false);\n  const [existingDestinationItems, setExistingDestinationItems] = useState<Array<{ id: string; name: string }>>([]);\n  const [error, setError] = useState<string | null>(null);",
+)
+replace_once(
+    "components/analyzer-form.tsx",
+    "  const [pickingDestination, setPickingDestination] = useState(false);",
+    "  const [pickingDestination, setPickingDestination] = useState(false);\n  const [pickingExisting, setPickingExisting] = useState(false);",
+)
+replace_once(
+    "components/analyzer-form.tsx",
+    "                setDestinationFolderRef(folderId);\n                setPickedDestinationName(folderName ?? \"Selected Drive folder\");",
+    "                setDestinationFolderRef(folderId);\n                setPickedDestinationName(folderName ?? \"Selected Drive folder\");\n                setMergeIntoDestination(false);\n                setExistingDestinationItems([]);",
+)
+
+choose_existing = r'''  async function chooseAlreadyCopiedItems() {
+    if (!isAuthenticated) {
+      setError("Sign in with Google before choosing already-copied items.");
+      return;
+    }
+    if (destinationMode !== "folder" || !destinationFolderRef.trim()) {
+      setError("Choose the partially filled destination folder first.");
+      return;
+    }
+
+    setPickingExisting(true);
+    setError(null);
+
+    try {
+      const [picker, response] = await Promise.all([
+        loadGooglePickerApi(),
+        fetch("/api/google/picker", { cache: "no-store" }),
+      ]);
+      const bootstrap = await response.json() as PickerBootstrap;
+      if (!response.ok) throw new Error(bootstrap.error ?? "Unable to open Google Picker");
+
+      const destinationId = destinationFolderRef.trim();
+      const view = new picker.DocsView(picker.ViewId.DOCS)
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true)
+        .setMode(picker.DocsViewMode.LIST)
+        .setParent(destinationId);
+
+      await new Promise<void>((resolve) => {
+        const pickerInstance = new picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(bootstrap.accessToken)
+          .setDeveloperKey(bootstrap.developerKey)
+          .setAppId(bootstrap.appId)
+          .setOrigin(window.location.origin)
+          .setMaxItems(25)
+          .setCallback((data) => {
+            const action = data[picker.Response.ACTION];
+            if (action === picker.Action.PICKED) {
+              const documents = data[picker.Response.DOCUMENTS] as Array<Record<string, string>> | undefined;
+              const items = (documents ?? []).flatMap((document) => {
+                const id = document[picker.Document.ID];
+                const name = document[picker.Document.NAME];
+                return id ? [{ id, name: name ?? "Existing Drive item" }] : [];
+              });
+              setExistingDestinationItems(items);
+              resolve();
+            } else if (action === picker.Action.CANCEL) {
+              resolve();
+            }
+          })
+          .build();
+        pickerInstance.setVisible(true);
+      });
+    } catch (pickerError) {
+      setError(pickerError instanceof Error ? pickerError.message : "Unable to open Google Picker");
+    } finally {
+      setPickingExisting(false);
+    }
+  }
+
+'''
+replace_once(
+    "components/analyzer-form.tsx",
+    "  async function startMigration() {\n",
+    choose_existing + "  async function startMigration() {\n",
+)
+replace_once(
+    "components/analyzer-form.tsx",
+    "          destinationFolderRef: destinationMode === \"root\" ? \"root\" : destinationFolderRef.trim(),\n        }),",
+    "          destinationFolderRef: destinationMode === \"root\" ? \"root\" : destinationFolderRef.trim(),\n          mergeIntoDestination: destinationMode === \"folder\" && mergeIntoDestination,\n          existingDestinationItemIds: existingDestinationItems.map((item) => item.id),\n        }),",
+)
+replace_once(
+    "components/analyzer-form.tsx",
+    "                      setDestinationFolderRef(event.target.value);\n                      setPickedDestinationName(null);",
+    "                      setDestinationFolderRef(event.target.value);\n                      setPickedDestinationName(null);\n                      setMergeIntoDestination(false);\n                      setExistingDestinationItems([]);",
+)
+
+ui_anchor = '''                <p className="text-xs leading-5 text-slate-500">
+                  Picker is recommended because it grants Drive Migrator access only to the folder you choose. Pasted folders must already be accessible to the app.
+                </p>'''
+ui_new = ui_anchor + r'''
+
+                <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
+                  <label className="flex items-start gap-2 text-sm text-slate-800">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={mergeIntoDestination}
+                      onChange={(event) => {
+                        setMergeIntoDestination(event.target.checked);
+                        if (!event.target.checked) setExistingDestinationItems([]);
+                      }}
+                    />
+                    <span>
+                      This folder already contains part of the source. Merge the source directly into it instead of creating another wrapper folder.
+                    </span>
+                  </label>
+
+                  {mergeIntoDestination ? (
+                    <div className="space-y-2">
+                      <Button type="button" onClick={chooseAlreadyCopiedItems} disabled={pickingExisting || !pickedDestinationName}>
+                        {pickingExisting ? "Opening Drive..." : "Choose files/folders already copied"}
+                      </Button>
+                      <p className="text-xs leading-5 text-slate-600">
+                        Select up to 25 items already present in this folder. If a copied subfolder contains copied files, select the subfolder and those files too. GDM will reuse only Picker-authorized matches.
+                      </p>
+                      {existingDestinationItems.length ? (
+                        <div className="rounded-lg bg-white px-3 py-2 text-xs text-emerald-700">
+                          {existingDestinationItems.length} already-copied item{existingDestinationItems.length === 1 ? "" : "s"} selected.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>'''
+replace_once("components/analyzer-form.tsx", ui_anchor, ui_new)
+
+# Migration creation stores verified Picker-authorized items before queueing.
+replace_once(
+    "app/api/migrations/route.ts",
+    "import { getGdmCloudflareEnv } from \"@/lib/cloudflare/context\";",
+    "import { getGdmCloudflareEnv } from \"@/lib/cloudflare/context\";\nimport { saveManualDedupSelection } from \"@/lib/cloudflare/manual-dedup\";",
+)
+replace_once(
+    "app/api/migrations/route.ts",
+    "import { getFreshGoogleAccessTokenD1 } from \"@/lib/google/user-auth-d1\";",
+    "import { getFreshGoogleAccessTokenD1 } from \"@/lib/google/user-auth-d1\";\nimport { getAuthorizedDestinationItem } from \"@/lib/google/selected-destination\";",
+)
+replace_once(
+    "app/api/migrations/route.ts",
+    "  destinationFolderRef: z.string().min(1).max(2048),\n});",
+    "  destinationFolderRef: z.string().min(1).max(2048),\n  mergeIntoDestination: z.boolean().optional().default(false),\n  existingDestinationItemIds: z.array(z.string().regex(/^[a-zA-Z0-9_-]+$/)).max(25).optional().default([]),\n});",
+)
+replace_once(
+    "app/api/migrations/route.ts",
+    "  let destination: { id: string; name: string };\n  try {\n    const accessToken = await getFreshGoogleAccessTokenD1(cloudflare, user);\n    destination = await validateDestinationFolder(accessToken, parsed.data.destinationFolderRef);",
+    "  let accessToken: string;\n  let destination: { id: string; name: string };\n  try {\n    accessToken = await getFreshGoogleAccessTokenD1(cloudflare, user);\n    destination = await validateDestinationFolder(accessToken, parsed.data.destinationFolderRef);",
+)
+replace_once(
+    "app/api/migrations/route.ts",
+    "\n  let creation;\n",
+    r'''
+  if (parsed.data.mergeIntoDestination && destination.id === "root") {
+    return NextResponse.json(
+      { error: "Choose a specific existing Drive folder to use partial-copy merge mode." },
+      { status: 400 },
+    );
+  }
+
+  if (parsed.data.existingDestinationItemIds.length && !parsed.data.mergeIntoDestination) {
+    return NextResponse.json(
+      { error: "Enable partial-copy merge mode before selecting already-copied items." },
+      { status: 400 },
+    );
+  }
+
+  const selectedDestinationItems = [];
+  try {
+    for (const itemId of parsed.data.existingDestinationItemIds) {
+      selectedDestinationItems.push(await getAuthorizedDestinationItem(accessToken, itemId));
+    }
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to verify already-copied Drive items" },
+      { status: 400 },
+    );
+  }
+
+  let creation;
+''',
+)
+replace_once(
+    "app/api/migrations/route.ts",
+    '''  if (creation.reused) {
+    return NextResponse.json({
+      migrationId: creation.migration.id,
+      status: creation.migration.status,
+      reused: true,
+    });
+  }
+
+  const migration = creation.migration;
+  try {
+''',
+    r'''  if (creation.reused) {
+    if (parsed.data.mergeIntoDestination || parsed.data.existingDestinationItemIds.length) {
+      return NextResponse.json(
+        {
+          migrationId: creation.migration.id,
+          status: creation.migration.status,
+          error: "An active migration already exists for this source and destination. Cancel it before starting partial-copy merge mode.",
+        },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({
+      migrationId: creation.migration.id,
+      status: creation.migration.status,
+      reused: true,
+    });
+  }
+
+  const migration = creation.migration;
+  try {
+    await saveManualDedupSelection(
+      cloudflare.DB,
+      migration.id,
+      parsed.data.mergeIntoDestination,
+      selectedDestinationItems,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to save partial-copy selections";
+    await setMigrationStatus(cloudflare.DB, migration.id, "paused", { errorMessage: message });
+    return NextResponse.json({ migrationId: migration.id, status: "paused", error: message }, { status: 500 });
+  }
+
+  try {
+''',
+)
+
+# Queue worker reuses only explicit Picker selections after marker checks.
+replace_once(
+    "cloudflare/jobs/worker.ts",
+    "import { publishMigrationJob, publishMigrationJobs } from \"@/lib/cloudflare/queue\";",
+    "import { publishMigrationJob, publishMigrationJobs } from \"@/lib/cloudflare/queue\";\nimport {\n  buildManualDuplicateLookup,\n  findSelectedDestinationItem,\n  getManualDedupOptions,\n} from \"@/lib/cloudflare/manual-dedup\";",
+)
+replace_once(
+    "cloudflare/jobs/worker.ts",
+    "  createDestinationFolder,\n  findDestinationMigrationItem,",
+    "  createDestinationFolder,\n  destinationFileName,\n  findDestinationMigrationItem,",
+)
+
+old_root = r'''  let destinationFolderId = job.destinationFolderId;
+  if (job.sourceFolderId === migration.sourceFolderId) {
+    const rootMarker = { migrationId: migration.id, sourceId: migration.sourceFolderId };
+    let rootId = migration.destinationRootFolderId ?? undefined;
+    if (!rootId) {
+      const existing = await findDestinationMigrationItem(
+        accessToken,
+        migration.destinationFolderId,
+        rootMarker,
+        DRIVE_FOLDER_MIME_TYPE,
+      );
+      rootId = existing?.id;
+      if (!rootId) {
+        const created = await createDestinationFolder(
+          accessToken,
+          migration.sourceFolderName,
+          migration.destinationFolderId,
+          rootMarker,
+        );
+        rootId = created.id;
+      }
+      if (!rootId) throw new Error("Unable to create destination migration root folder");
+      await setMigrationRootFolder(env.DB, migration.id, rootId);
+    }
+    destinationFolderId = rootId;
+  }
+'''
+new_root = r'''  let destinationFolderId = job.destinationFolderId;
+  if (job.sourceFolderId === migration.sourceFolderId) {
+    const rootMarker = { migrationId: migration.id, sourceId: migration.sourceFolderId };
+    const manualOptions = await getManualDedupOptions(env.DB, migration.id);
+    let rootId = migration.destinationRootFolderId ?? undefined;
+    if (!rootId && manualOptions.mergeIntoDestination) {
+      rootId = migration.destinationFolderId;
+    }
+    if (!rootId) {
+      const existing = await findDestinationMigrationItem(
+        accessToken,
+        migration.destinationFolderId,
+        rootMarker,
+        DRIVE_FOLDER_MIME_TYPE,
+      );
+      rootId = existing?.id;
+      if (!rootId) {
+        const created = await createDestinationFolder(
+          accessToken,
+          migration.sourceFolderName,
+          migration.destinationFolderId,
+          rootMarker,
+        );
+        rootId = created.id;
+      }
+    }
+    if (!rootId) throw new Error("Unable to resolve destination migration root folder");
+    if (!migration.destinationRootFolderId) await setMigrationRootFolder(env.DB, migration.id, rootId);
+    destinationFolderId = rootId;
+  }
+'''
+replace_once("cloudflare/jobs/worker.ts", old_root, new_root)
+
+old_folder = r'''    if (source.mimeType === DRIVE_FOLDER_MIME_TYPE) {
+      const marker = { migrationId: migration.id, sourceId: source.id };
+      let destinationChild = await findDestinationMigrationItem(
+        accessToken,
+        destinationFolderId,
+        marker,
+        DRIVE_FOLDER_MIME_TYPE,
+      );
+      if (!destinationChild?.id) {
+        destinationChild = await createDestinationFolder(
+          accessToken,
+          sourceName,
+          destinationFolderId,
+          marker,
+        );
+      }
+      if (!destinationChild.id) throw new Error(`Unable to create destination folder for ${sourcePath}`);
+
+      const childItem = await upsertMigrationItem(env.DB, {
+        migrationId: migration.id,
+        sourceFileId: source.id,
+        sourceName,
+        sourceMimeType: DRIVE_FOLDER_MIME_TYPE,
+        sourcePath,
+        destinationFolderId: destinationChild.id,
+        itemType: "folder",
+      });
+      if (childItem?.status !== "completed") {
+        scanJobs.push({
+          type: "scan-folder",
+          migrationId: migration.id,
+          sourceFolderId: source.id,
+          sourceName,
+          sourcePath,
+          destinationFolderId: destinationChild.id,
+        });
+      }
+      continue;
+    }
+'''
+new_folder = r'''    if (source.mimeType === DRIVE_FOLDER_MIME_TYPE) {
+      const marker = { migrationId: migration.id, sourceId: source.id };
+      let destinationChildId = (await findDestinationMigrationItem(
+        accessToken,
+        destinationFolderId,
+        marker,
+        DRIVE_FOLDER_MIME_TYPE,
+      ))?.id;
+
+      if (!destinationChildId) {
+        destinationChildId = (await findSelectedDestinationItem(
+          env.DB,
+          migration.id,
+          destinationFolderId,
+          { name: sourceName, mimeType: DRIVE_FOLDER_MIME_TYPE },
+        ))?.destinationFileId;
+      }
+
+      if (!destinationChildId) {
+        const created = await createDestinationFolder(
+          accessToken,
+          sourceName,
+          destinationFolderId,
+          marker,
+        );
+        destinationChildId = created.id;
+      }
+      if (!destinationChildId) throw new Error(`Unable to create destination folder for ${sourcePath}`);
+
+      const childItem = await upsertMigrationItem(env.DB, {
+        migrationId: migration.id,
+        sourceFileId: source.id,
+        sourceName,
+        sourceMimeType: DRIVE_FOLDER_MIME_TYPE,
+        sourcePath,
+        destinationFolderId: destinationChildId,
+        itemType: "folder",
+      });
+      if (childItem?.status !== "completed") {
+        scanJobs.push({
+          type: "scan-folder",
+          migrationId: migration.id,
+          sourceFolderId: source.id,
+          sourceName,
+          sourcePath,
+          destinationFolderId: destinationChildId,
+        });
+      }
+      continue;
+    }
+'''
+replace_once("cloudflare/jobs/worker.ts", old_folder, new_folder)
+
+old_transfer = r'''  assertCopyableDriveFile(sourceFile);
+  const marker = { migrationId: migration.id, sourceId: item.sourceFileId };
+  const workspace = sourceFile.mimeType ? workspaceExportConfig[sourceFile.mimeType] : undefined;
+  const existing = await findDestinationMigrationItem(
+    accessToken,
+    item.destinationFolderId ?? migration.destinationRootFolderId ?? migration.destinationFolderId,
+    marker,
+  );
+
+  if (!workspace && existing?.id) {
+    await finishTransferredItem(env, item, existing.id);
+    return;
+  }
+  if (workspace && existing?.id && isCompletedWorkspaceDestination(existing)) {
+    await finishTransferredItem(env, item, existing.id);
+    return;
+  }
+
+  const parentId = item.destinationFolderId ?? migration.destinationRootFolderId ?? migration.destinationFolderId;
+  if (workspace) {
+'''
+new_transfer = r'''  assertCopyableDriveFile(sourceFile);
+  const marker = { migrationId: migration.id, sourceId: item.sourceFileId };
+  const workspace = sourceFile.mimeType ? workspaceExportConfig[sourceFile.mimeType] : undefined;
+  const parentId = item.destinationFolderId ?? migration.destinationRootFolderId ?? migration.destinationFolderId;
+  const existing = await findDestinationMigrationItem(
+    accessToken,
+    parentId,
+    marker,
+  );
+
+  if (!workspace && existing?.id) {
+    await finishTransferredItem(env, item, existing.id);
+    return;
+  }
+  if (workspace && existing?.id && isCompletedWorkspaceDestination(existing)) {
+    await finishTransferredItem(env, item, existing.id);
+    return;
+  }
+
+  const selectedExisting = await findSelectedDestinationItem(
+    env.DB,
+    migration.id,
+    parentId,
+    buildManualDuplicateLookup({
+      name: destinationFileName(sourceFile),
+      size: Number(sourceFile.size ?? item.size ?? 0),
+      workspaceMimeType: workspace?.mimeType,
+    }),
+  );
+  if (selectedExisting?.destinationFileId) {
+    await finishTransferredItem(env, item, selectedExisting.destinationFileId);
+    return;
+  }
+
+  if (workspace) {
+'''
+replace_once("cloudflare/jobs/worker.ts", old_transfer, new_transfer)
+
+print("Partial destination dedup implementation applied")
