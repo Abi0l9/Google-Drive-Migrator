@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GoogleReconnectLink } from "@/components/google-reconnect-link";
 import { Button, Card } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
+import { messageNeedsGoogleReauthorization } from "@/lib/google/auth-errors";
 import {
   updateTransferMetrics,
   type TransferSample,
@@ -144,6 +146,8 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
     : 0;
   const active = ["pending", "scanning", "running"].includes(progress.status ?? "");
   const etaLabel = formatEta(etaSeconds);
+  const reauthRequired = messageNeedsGoogleReauthorization(progress.errorMessage)
+    || Boolean(progress.failedItems?.some((item) => messageNeedsGoogleReauthorization(item.error)));
 
   return (
     <div className="space-y-5">
@@ -151,6 +155,20 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
 
       {progress.errorMessage ? (
         <p className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-800">{progress.errorMessage}</p>
+      ) : null}
+
+      {reauthRequired ? (
+        <Card className="border-amber-200 bg-amber-50">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-semibold text-slate-950">Google Drive needs to be reconnected</h3>
+              <p className="mt-1 text-sm text-slate-700">
+                Your migration record is safe. Reconnect Google Drive, return here, then retry the failed transfer.
+              </p>
+            </div>
+            <GoogleReconnectLink redirectTo={`/migrations/${migrationId}`} />
+          </div>
+        </Card>
       ) : null}
 
       <Card>
@@ -274,9 +292,13 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
         <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-semibold text-slate-950">Some files did not transfer.</h3>
-            <p className="text-sm text-slate-600">Retry only the failed files without rebuilding the migration.</p>
+            <p className="text-sm text-slate-600">
+              {reauthRequired
+                ? "Reconnect Google Drive first, then retry only the failed files."
+                : "Retry only the failed files without rebuilding the migration."}
+            </p>
           </div>
-          <Button onClick={retryFailedFiles} disabled={retrying}>
+          <Button onClick={retryFailedFiles} disabled={retrying || reauthRequired}>
             {retrying ? "Retrying..." : `Retry ${progress.failedFiles} failed`}
           </Button>
         </Card>
