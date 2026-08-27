@@ -128,6 +128,12 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
   const [creating, setCreating] = useState(false);
   const [pickingDestination, setPickingDestination] = useState(false);
 
+  function updateSourceUrl(nextUrl: string) {
+    setUrl(nextUrl);
+    setError(null);
+    if (analysis) setAnalysis(null);
+  }
+
   async function analyze() {
     setLoading(true);
     setError(null);
@@ -137,7 +143,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderUrl: url }),
+        body: JSON.stringify({ folderUrl: url.trim() }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -146,7 +152,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
       }
       setAnalysis(payload);
     } catch {
-      setError("Unable to reach Drive Migrator. Check your connection and try again.");
+      setError("Unable to reach GDM. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -220,6 +226,10 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
 
   async function startMigration() {
     if (!analysis) return;
+    if (destinationMode === "folder" && !destinationFolderRef) {
+      setError("Choose a destination folder from Google Drive before starting the migration.");
+      return;
+    }
 
     setCreating(true);
     setError(null);
@@ -230,9 +240,9 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sourceFolderId: analysis.folderId,
-          sourceFolderUrl: url,
+          sourceFolderUrl: url.trim(),
           sourceFolderName: analysis.folderName,
-          destinationFolderRef: destinationMode === "root" ? "root" : destinationFolderRef.trim(),
+          destinationFolderRef: destinationMode === "root" ? "root" : destinationFolderRef,
         }),
       });
       const payload = await response.json();
@@ -250,6 +260,9 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
     }
   }
 
+  const destinationReady = destinationMode === "root" || Boolean(destinationFolderRef);
+  const destinationName = destinationMode === "root" ? "My Drive" : pickedDestinationName;
+
   return (
     <Card className="space-y-5">
       <div>
@@ -257,19 +270,24 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
         <input
           id="folderUrl"
           value={url}
-          onChange={(event) => setUrl(event.target.value)}
+          onChange={(event) => updateSourceUrl(event.target.value)}
           placeholder="https://drive.google.com/drive/folders/xxxxxxxx"
+          aria-describedby="folder-url-help"
           className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
         />
+        <p id="folder-url-help" className="mt-2 text-xs leading-5 text-slate-500">
+          The source folder must be publicly accessible. GDM never modifies the source.
+        </p>
       </div>
 
       <Button onClick={analyze} disabled={loading || !url.trim()}>{loading ? "Analyzing..." : "Analyze Folder"}</Button>
 
-      {error ? <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+      {error ? <p role="alert" aria-live="polite" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
 
       {analysis ? (
         <div className="space-y-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
           <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Ready to migrate</p>
             <h3 className="mb-3 text-lg font-semibold text-slate-950">{analysis.folderName}</h3>
             <dl className="grid grid-cols-3 gap-3">
               <div><dt>Files</dt><dd className="font-bold">{analysis.files}</dd></div>
@@ -284,62 +302,58 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
               <input
                 type="radio"
                 checked={destinationMode === "root"}
-                onChange={() => setDestinationMode("root")}
+                onChange={() => {
+                  setDestinationMode("root");
+                  setError(null);
+                }}
               />
-              My Drive root
+              My Drive
             </label>
             <label className="flex items-center gap-2">
               <input
                 type="radio"
                 checked={destinationMode === "folder"}
-                onChange={() => setDestinationMode("folder")}
+                onChange={() => {
+                  setDestinationMode("folder");
+                  setError(null);
+                }}
               />
-              Existing Drive folder
+              Choose an existing folder
             </label>
 
             {destinationMode === "folder" ? (
-              <div className="space-y-3">
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Button type="button" onClick={chooseDestinationFolder} disabled={pickingDestination || !isAuthenticated}>
-                    {pickingDestination ? "Opening Drive..." : "Choose from Google Drive"}
-                  </Button>
-                  {pickedDestinationName ? (
-                    <div className="flex flex-1 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                      Selected: {pickedDestinationName}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-xs font-medium text-slate-600" htmlFor="destinationFolderRef">
-                    Or paste a folder URL or ID
-                  </label>
-                  <input
-                    id="destinationFolderRef"
-                    value={destinationFolderRef}
-                    onChange={(event) => {
-                      setDestinationFolderRef(event.target.value);
-                      setPickedDestinationName(null);
-                    }}
-                    placeholder="https://drive.google.com/drive/folders/xxxxxxxx"
-                    className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-                  />
-                </div>
-                <p className="text-xs leading-5 text-slate-500">
-                  Picker is recommended because it grants Drive Migrator access only to the folder you choose. Pasted folders must already be accessible to the app.
-                </p>
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                <Button type="button" onClick={chooseDestinationFolder} disabled={pickingDestination || !isAuthenticated}>
+                  {pickingDestination ? "Opening Drive..." : pickedDestinationName ? "Change destination" : "Choose from Google Drive"}
+                </Button>
+                {pickedDestinationName ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                    Selected: {pickedDestinationName}
+                  </div>
+                ) : (
+                  <p className="text-xs leading-5 text-slate-500">
+                    Google Picker grants GDM access only to the folder you explicitly choose.
+                  </p>
+                )}
+                {!isAuthenticated ? <p className="text-xs text-slate-600">Sign in with Google to choose a destination folder.</p> : null}
               </div>
             ) : null}
           </fieldset>
 
+          {destinationName ? (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              GDM will create <strong>{analysis.folderName}</strong> inside <strong>{destinationName}</strong>.
+            </div>
+          ) : null}
+
           <Button
             onClick={startMigration}
-            disabled={creating || !isAuthenticated || (destinationMode === "folder" && !destinationFolderRef.trim())}
+            disabled={creating || !isAuthenticated || !destinationReady}
           >
             {creating ? "Starting..." : "Start Migration"}
           </Button>
 
-          {!authConfigured ? <p className="text-sm text-red-700">Set a real Google OAuth client ID and secret before starting a migration.</p> : null}
+          {!authConfigured ? <p className="text-sm text-red-700">Google sign-in is not configured for this deployment.</p> : null}
           {authConfigured && !isAuthenticated ? <p className="text-sm text-slate-600">Sign in with Google before starting a migration.</p> : null}
         </div>
       ) : null}

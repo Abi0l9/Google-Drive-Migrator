@@ -6,8 +6,8 @@ Google Drive Folder Migrator (GDM) copies a publicly accessible Google Drive fol
 
 - Analyze public Google Drive folder URLs recursively before starting a migration.
 - Sign in with Google through Auth.js using the narrow `drive.file` scope.
-- Choose a destination with Google Picker or paste an already app-authorized folder URL/ID.
-- Recreate nested folder structures in My Drive or a selected Drive folder.
+- Choose an existing destination folder with Google Picker or migrate into My Drive.
+- Recreate nested folder structures in My Drive or the selected Drive folder.
 - Stream standard Drive files source-to-destination without writing them to local disk.
 - Export Google Docs to DOCX, Sheets to XLSX, and Slides to PPTX.
 - Use resumable 8 MB chunk uploads for standard files larger than 5 MB.
@@ -42,7 +42,9 @@ Use one Google Cloud project for the OAuth client, Drive API, and Picker App ID.
 4. Create `GOOGLE_API_KEY` for server-side public-folder Drive reads. Restrict it to the Drive API where possible.
 5. Create a separate browser key for `GOOGLE_PICKER_API_KEY`. Restrict it to the Google Picker API and your allowed HTTP referrers/domains.
 6. Set `GOOGLE_CLOUD_PROJECT_NUMBER` to the numeric Cloud project number. Picker requires this App ID when using the `drive.file` scope.
-7. Configure the OAuth consent screen and add the `https://www.googleapis.com/auth/drive.file` scope.
+7. Configure the OAuth consent screen and add only the Google scopes the app uses: `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/drive.file`.
+
+GDM intentionally uses Google Picker for existing destination folders. That explicit selection keeps the destination flow aligned with the narrow `drive.file` permission instead of requesting broad Drive access.
 
 The Picker bootstrap endpoint returns a fresh user access token only when an authenticated user opens Picker. The response is `no-store`; OAuth tokens are not placed on the normal Auth.js session object.
 
