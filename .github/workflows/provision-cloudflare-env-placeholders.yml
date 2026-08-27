@@ -1,0 +1,77 @@
+name: Provision Cloudflare Env Placeholders
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - .github/workflows/provision-cloudflare-env-placeholders.yml
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Create placeholder secret files
+        shell: bash
+        run: |
+          cat > /tmp/gdm-web-secrets.json <<'JSON'
+          {
+            "GOOGLE_API_KEY": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "GOOGLE_PICKER_API_KEY": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "GOOGLE_CLOUD_PROJECT_NUMBER": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "GOOGLE_CLIENT_ID": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "GOOGLE_CLIENT_SECRET": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "NEXTAUTH_SECRET": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "TOKEN_ENCRYPTION_KEY": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "NEXTAUTH_URL": "https://gdm-web.realk9sh.workers.dev",
+            "ADMIN_EMAILS": "__REPLACE_ME_IN_CLOUDFLARE__"
+          }
+          JSON
+
+          cat > /tmp/gdm-jobs-secrets.json <<'JSON'
+          {
+            "GOOGLE_API_KEY": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "GOOGLE_CLIENT_ID": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "GOOGLE_CLIENT_SECRET": "__REPLACE_ME_IN_CLOUDFLARE__",
+            "TOKEN_ENCRYPTION_KEY": "__REPLACE_ME_IN_CLOUDFLARE__"
+          }
+          JSON
+
+      - name: Ensure gdm-jobs Worker exists
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: 4.125.0
+          command: deploy --config wrangler.jobs-bootstrap.jsonc
+
+      - name: Create gdm-web secret slots
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: 4.125.0
+          command: secret bulk /tmp/gdm-web-secrets.json --name gdm-web
+
+      - name: Create gdm-jobs secret slots
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: 4.125.0
+          command: secret bulk /tmp/gdm-jobs-secrets.json --name gdm-jobs
+
+      - name: Verify secret names
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: 4.125.0
+          command: secret list --name gdm-web
