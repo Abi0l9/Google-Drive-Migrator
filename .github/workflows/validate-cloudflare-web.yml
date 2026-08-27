@@ -9,6 +9,7 @@ on:
       - app/**
       - auth.ts
       - components/**
+      - cloudflare/migrations/**
       - lib/cloudflare/**
       - lib/google/**
       - lib/crypto.ts
