@@ -50,8 +50,11 @@ jobs:
           fi
           echo "Web surface is free of MongoDB/Redis/BullMQ/googleapis runtime imports"
 
-      - name: Generate Cloudflare binding types
+      - name: Generate web Worker binding types
         run: npx wrangler@4.125.0 types --config wrangler.jsonc --env-interface CloudflareEnv cloudflare-env.d.ts
+
+      - name: Generate jobs Worker binding types
+        run: npx wrangler@4.125.0 types --config wrangler.jobs.jsonc --env-interface CloudflareJobsEnv cloudflare-jobs-env.d.ts
 
       - name: Tests
         run: npm test
