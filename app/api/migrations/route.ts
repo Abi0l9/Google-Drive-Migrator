@@ -3,6 +3,11 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
 import { env } from "@/lib/env";
+import {
+  GOOGLE_REAUTH_REQUIRED,
+  GoogleReauthorizationRequiredError,
+  isGoogleReauthorizationRequiredError,
+} from "@/lib/google/auth-errors";
 import { extractDriveFolderId, userDrive, validateDestinationFolder } from "@/lib/google/drive";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { canCreateActiveMigration } from "@/lib/migration/quota";
@@ -50,7 +55,13 @@ export async function POST(request: Request) {
 
   await connectDb();
   const user = await User.findOne({ email: session.user.email });
-  if (!user?.accessToken) return NextResponse.json({ error: "Google Drive authorization required" }, { status: 403 });
+  if (!user?.accessToken) {
+    const reconnect = new GoogleReauthorizationRequiredError();
+    return NextResponse.json(
+      { error: reconnect.message, code: GOOGLE_REAUTH_REQUIRED },
+      { status: 403 },
+    );
+  }
 
   const quota = await rateLimit(`migration-create:${user._id.toString()}`, 5, 60_000);
   if (!quota.allowed) {
@@ -62,6 +73,13 @@ export async function POST(request: Request) {
     const accessToken = await getFreshGoogleAccessToken(user);
     destination = await validateDestinationFolder(userDrive(accessToken), parsed.data.destinationFolderRef);
   } catch (error) {
+    if (isGoogleReauthorizationRequiredError(error)) {
+      return NextResponse.json(
+        { error: error.message, code: GOOGLE_REAUTH_REQUIRED },
+        { status: 403 },
+      );
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to access destination folder" },
       { status: 403 },

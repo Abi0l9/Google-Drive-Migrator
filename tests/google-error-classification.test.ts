@@ -25,10 +25,24 @@ test("does not retry permission, invalid credential, or missing-file errors", ()
   assert.equal(classifyGoogleDriveError({ response: { status: 404 } }), "permanent");
 });
 
+test("turns Drive 401 responses into actionable reconnect details", () => {
+  const details = googleDriveErrorDetails({ response: { status: 401 }, message: "Invalid Credentials" });
+  assert.equal(details.status, 401);
+  assert.equal(details.networkCode, "GOOGLE_REAUTH_REQUIRED");
+  assert.match(details.message, /needs to be reconnected/i);
+});
+
 test("does not retry GDM unsupported Drive item errors", () => {
   assert.equal(classifyGoogleDriveError({
     code: "GDM_UNSUPPORTED_DRIVE_ITEM",
     message: "Google Drive shortcuts are not copied",
+  }), "permanent");
+});
+
+test("does not retry explicit Google reconnect-required errors", () => {
+  assert.equal(classifyGoogleDriveError({
+    code: "GOOGLE_REAUTH_REQUIRED",
+    message: "Google Drive access needs to be reconnected.",
   }), "permanent");
 });
 
