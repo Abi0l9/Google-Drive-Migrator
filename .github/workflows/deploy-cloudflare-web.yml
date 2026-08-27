@@ -1,0 +1,79 @@
+name: Deploy Cloudflare Web
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - app/**
+      - auth.ts
+      - components/**
+      - lib/**
+      - next.config.ts
+      - open-next.config.ts
+      - package.json
+      - package-lock.json
+      - wrangler.jsonc
+      - .github/workflows/deploy-cloudflare-web.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOOGLE_API_KEY: AIza-build-placeholder
+      GOOGLE_PICKER_API_KEY: AIza-build-picker-placeholder
+      GOOGLE_CLOUD_PROJECT_NUMBER: "123456789012"
+      GOOGLE_CLIENT_ID: build.apps.googleusercontent.com
+      GOOGLE_CLIENT_SECRET: build-google-client-secret
+      NEXTAUTH_SECRET: build-nextauth-secret-with-sufficient-length
+      NEXTAUTH_URL: https://gdm-web.realk9sh.workers.dev
+      TOKEN_ENCRYPTION_KEY: build-token-encryption-key-with-sufficient-length
+      ADMIN_EMAILS: admin@example.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Cloudflare binding types
+        run: |
+          npx wrangler@4.125.0 types --config wrangler.jsonc --env-interface CloudflareEnv cloudflare-env.d.ts
+          npx wrangler@4.125.0 types --config wrangler.jobs.jsonc --env-interface CloudflareJobsEnv cloudflare-jobs-env.d.ts
+
+      - name: Verify release
+        run: |
+          npm test
+          npm run typecheck
+          npm run lint
+
+      - name: Build OpenNext Worker
+        run: npm run cf:build
+
+      - name: Deploy gdm-web
+        run: npx wrangler@4.125.0 deploy --config wrangler.jsonc
+
+      - name: Smoke test live Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://gdm-web.realk9sh.workers.dev"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$base/" >/tmp/gdm-home.html
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$base/api/health" >/tmp/gdm-health.json
+          grep -q "Drive Migrator" /tmp/gdm-home.html
+          cat /tmp/gdm-health.json
+          echo "gdm-web production smoke test passed"
