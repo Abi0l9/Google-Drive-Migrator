@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { auth } from "@/auth";
 import { SignInButton } from "@/components/auth-actions";
+import { GdmBrand } from "@/components/brand";
 import { Card } from "@/components/ui";
 import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
 import { listMigrationsForUser, getUserByEmail } from "@/lib/cloudflare/d1";
@@ -21,13 +23,19 @@ export default async function DashboardPage() {
   const failed = migrations.reduce((sum, migration) => sum + (migration.failedFiles ?? 0), 0);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-8 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="mb-2 text-3xl font-bold">Migration Dashboard</h1>
-          <p className="text-slate-600">Signed in as {session?.user?.email ?? "guest"}.</p>
+    <main className="mx-auto min-h-screen max-w-5xl px-6 py-8 sm:py-10">
+      <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-5">
+          <GdmBrand compact priority />
+          <div>
+            <h1 className="mb-2 text-3xl font-bold text-slate-950">Migration Dashboard</h1>
+            <p className="text-slate-600">Signed in as {session?.user?.email ?? "guest"}.</p>
+          </div>
         </div>
-        {!session?.user?.email ? <SignInButton disabled={!googleOAuthConfigured} /> : null}
+        <div className="flex items-center gap-3">
+          <Link href="/" className="text-sm font-medium text-slate-600 hover:text-slate-950">New migration</Link>
+          {!session?.user?.email ? <SignInButton disabled={!googleOAuthConfigured} /> : null}
+        </div>
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         <Card><p className="text-sm text-slate-500">Migrations</p><strong className="text-3xl">{migrations.length}</strong></Card>
