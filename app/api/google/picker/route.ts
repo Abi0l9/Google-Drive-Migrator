@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { connectDb } from "@/lib/db";
 import { env, isGooglePickerConfigured } from "@/lib/env";
+import {
+  GOOGLE_REAUTH_REQUIRED,
+  GoogleReauthorizationRequiredError,
+  isGoogleReauthorizationRequiredError,
+} from "@/lib/google/auth-errors";
 import { getFreshGoogleAccessToken } from "@/lib/google/user-auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { User } from "@/models/user";
@@ -27,7 +32,11 @@ export async function GET() {
   await connectDb();
   const user = await User.findOne({ email: session.user.email });
   if (!user?.accessToken) {
-    return NextResponse.json({ error: "Google Drive authorization required" }, { status: 403, headers: noStoreHeaders });
+    const reconnect = new GoogleReauthorizationRequiredError();
+    return NextResponse.json(
+      { error: reconnect.message, code: GOOGLE_REAUTH_REQUIRED },
+      { status: 403, headers: noStoreHeaders },
+    );
   }
 
   const quota = await rateLimit(`picker-token:${user._id.toString()}`, 20, 60_000);
@@ -46,6 +55,13 @@ export async function GET() {
       { headers: noStoreHeaders },
     );
   } catch (error) {
+    if (isGoogleReauthorizationRequiredError(error)) {
+      return NextResponse.json(
+        { error: error.message, code: GOOGLE_REAUTH_REQUIRED },
+        { status: 403, headers: noStoreHeaders },
+      );
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to authorize Google Picker" },
       { status: 403, headers: noStoreHeaders },
