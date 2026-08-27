@@ -1,6 +1,10 @@
 import { google } from "googleapis";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import { env } from "@/lib/env";
+import {
+  GoogleReauthorizationRequiredError,
+  isGoogleReauthorizationFailure,
+} from "@/lib/google/auth-errors";
 
 interface GoogleTokenUser {
   accessToken?: string | null;
@@ -21,17 +25,25 @@ export async function getFreshGoogleAccessToken(user: GoogleTokenUser) {
   }
 
   if (!refreshToken) {
-    if (accessToken) return accessToken;
-    throw new Error("Google Drive authorization expired. Sign in with Google again.");
+    throw new GoogleReauthorizationRequiredError();
   }
 
   const oauth2 = new google.auth.OAuth2(env.googleClientId, env.googleClientSecret);
   oauth2.setCredentials({ refresh_token: refreshToken });
 
-  const response = await oauth2.getAccessToken();
+  let response: Awaited<ReturnType<typeof oauth2.getAccessToken>>;
+  try {
+    response = await oauth2.getAccessToken();
+  } catch (error) {
+    if (isGoogleReauthorizationFailure(error)) {
+      throw new GoogleReauthorizationRequiredError();
+    }
+    throw error;
+  }
+
   const refreshedAccessToken = response.token ?? oauth2.credentials.access_token;
   if (!refreshedAccessToken) {
-    throw new Error("Unable to refresh Google Drive authorization. Sign in with Google again.");
+    throw new GoogleReauthorizationRequiredError();
   }
 
   const encryptedAccessToken = encryptToken(refreshedAccessToken);
