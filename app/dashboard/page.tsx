@@ -1,35 +1,20 @@
 import { auth } from "@/auth";
 import { SignInButton } from "@/components/auth-actions";
 import { Card } from "@/components/ui";
-import { connectDb } from "@/lib/db";
-import { isGoogleOAuthConfigured } from "@/lib/env";
-import { Migration } from "@/models/migration";
-import { User } from "@/models/user";
-
-interface DashboardMigration {
-  _id: { toString(): string };
-  sourceFolderName: string;
-  status: string;
-  totalFiles?: number;
-  completedFiles?: number;
-  failedFiles?: number;
-  createdAt?: Date;
-}
+import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
+import { listMigrationsForUser, getUserByEmail } from "@/lib/cloudflare/d1";
 
 export default async function DashboardPage() {
   const session = await auth();
-  const googleOAuthConfigured = isGoogleOAuthConfigured();
-  let migrations: DashboardMigration[] = [];
+  const cloudflare = getGdmCloudflareEnv();
+  const googleOAuthConfigured =
+    cloudflare.GOOGLE_CLIENT_ID?.endsWith(".apps.googleusercontent.com") &&
+    Boolean(cloudflare.GOOGLE_CLIENT_SECRET);
+  let migrations = [] as Awaited<ReturnType<typeof listMigrationsForUser>>;
 
   if (session?.user?.email) {
-    await connectDb();
-    const user = await User.findOne({ email: session.user.email }).select("_id").lean<{ _id: unknown }>();
-    if (user) {
-      migrations = await Migration.find({ userId: user._id })
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .lean<DashboardMigration[]>();
-    }
+    const user = await getUserByEmail(cloudflare.DB, session.user.email);
+    if (user) migrations = await listMigrationsForUser(cloudflare.DB, user.id, 10);
   }
 
   const completed = migrations.reduce((sum, migration) => sum + (migration.completedFiles ?? 0), 0);
@@ -55,8 +40,8 @@ export default async function DashboardPage() {
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
             {migrations.map((migration) => (
               <a
-                key={migration._id.toString()}
-                href={`/migrations/${migration._id.toString()}`}
+                key={migration.id}
+                href={`/migrations/${migration.id}`}
                 className="grid gap-2 border-b border-slate-100 p-4 text-sm last:border-b-0 hover:bg-slate-50 md:grid-cols-[1fr_auto_auto]"
               >
                 <span className="font-medium text-slate-950">{migration.sourceFolderName}</span>
