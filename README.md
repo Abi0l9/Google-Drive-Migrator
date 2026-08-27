@@ -5,6 +5,8 @@ Google Drive Folder Migrator (GDM) copies a publicly accessible Google Drive fol
 ## Current capabilities
 
 - Analyze public Google Drive folder URLs recursively before starting a migration.
+- Sign analyzed folder totals with a short-lived server proof so migration requests cannot forge file/byte counts.
+- Enforce configurable per-user active-migration and monthly transfer allowances.
 - Sign in with Google through Auth.js using the narrow `drive.file` scope.
 - Choose an existing destination folder with Google Picker or migrate into My Drive.
 - Recreate nested folder structures in My Drive or the selected Drive folder.
@@ -64,8 +66,13 @@ See `.env.example`. Important values include:
 - `NEXTAUTH_URL`
 - `TOKEN_ENCRYPTION_KEY`
 - `ADMIN_EMAILS` as a comma-separated allowlist
+- `MAX_ACTIVE_MIGRATIONS_PER_USER` (default `3`)
+- `MAX_MONTHLY_TRANSFER_BYTES_PER_USER` (default `107374182400`, or 100 GiB)
+- `MAX_MONTHLY_TRANSFER_FILES_PER_USER` (default `100000`)
 
-Use a stable, strong `TOKEN_ENCRYPTION_KEY` in every environment that runs the web app or worker. Changing it makes previously encrypted Google tokens and resumable-upload session URLs unreadable.
+Use a stable, strong `TOKEN_ENCRYPTION_KEY` in every environment that runs the web app or worker. Changing it makes previously encrypted Google tokens and resumable-upload session URLs unreadable. The web tier also uses the same authenticated encryption primitive to sign short-lived folder-analysis proofs, so every web replica must use the same key.
+
+Monthly usage is reserved when a verified analyzed folder is accepted for migration. The allowance resets at the start of each UTC month. A migration request rejected before it reaches the queue does not consume the monthly allowance, and an immediate queue failure releases the reservation.
 
 ## Docker local stack
 
