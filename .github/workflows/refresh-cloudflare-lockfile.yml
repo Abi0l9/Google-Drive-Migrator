@@ -1,0 +1,54 @@
+name: Refresh Cloudflare Lockfile
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - .github/workflows/refresh-cloudflare-lockfile.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: feat/cloudflare-free-runtime
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Regenerate deterministic lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Verify clean install
+        run: npm ci --no-audit --no-fund
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run tests
+        run: npm test
+
+      - name: Commit lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- package-lock.json
+          git commit -m "Refresh lockfile for Cloudflare runtime"
+          git push origin HEAD:feat/cloudflare-free-runtime
