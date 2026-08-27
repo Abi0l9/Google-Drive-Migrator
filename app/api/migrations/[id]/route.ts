@@ -1,73 +1,40 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { connectDb } from "@/lib/db";
-import { rateLimit } from "@/lib/rate-limit";
-import { Migration } from "@/models/migration";
-import { MigrationItem } from "@/models/migration-item";
-import { User } from "@/models/user";
-
-interface MigrationProgressRecord {
-  userId: { toString(): string };
-  totalFiles?: number;
-  completedFiles?: number;
-  failedFiles?: number;
-  status?: string;
-  copiedBytes?: number;
-  totalBytes?: number;
-  errorMessage?: string;
-}
-
-interface UserIdRecord {
-  _id: { toString(): string };
-}
-
-interface CurrentMigrationItemRecord {
-  sourceName?: string;
-  uploadedBytes?: number;
-  size?: number;
-}
-
-interface FailedMigrationItemRecord {
-  _id: { toString(): string };
-  sourceName?: string;
-  sourcePath?: string;
-  errorMessage?: string;
-  retryCount?: number;
-}
+import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
+import {
+  getCurrentCopyingItem,
+  getMigrationForUser,
+  getUserByEmail,
+  listFailedFileItems,
+} from "@/lib/cloudflare/d1";
+import { reconcileMigrationCounters } from "@/lib/cloudflare/d1-jobs";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
-  if (!session?.user?.email) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  }
 
-  await connectDb();
+  const cloudflare = getGdmCloudflareEnv();
   const { id } = await params;
-  const user = await User.findOne({ email: session.user.email }).select("_id").lean<UserIdRecord>();
+  const user = await getUserByEmail(cloudflare.DB, session.user.email);
   if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
-  const quota = await rateLimit(`migration-progress:${user._id.toString()}:${id}`, 90, 60_000);
-  if (!quota.allowed) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((quota.resetAt - Date.now()) / 1000));
+  const quota = await cloudflare.API_RATE_LIMITER.limit({ key: `migration-progress:${user.id}:${id}` });
+  if (!quota.success) {
     return NextResponse.json(
       { error: "Too many progress requests. Try again shortly." },
-      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+      { status: 429, headers: { "Retry-After": "60" } },
     );
   }
 
-  const migration = await Migration.findById(id).lean<MigrationProgressRecord>();
+  let migration = await getMigrationForUser(cloudflare.DB, id, user.id);
   if (!migration) return NextResponse.json({ error: "Migration not found" }, { status: 404 });
-  if (migration.userId.toString() !== user._id.toString()) {
-    return NextResponse.json({ error: "Migration not found" }, { status: 404 });
-  }
 
+  migration = (await reconcileMigrationCounters(cloudflare.DB, id)) ?? migration;
   const [current, failedItemRecords] = await Promise.all([
-    MigrationItem.findOne({ migrationId: id, status: "copying" })
-      .select("sourceName uploadedBytes size")
-      .lean<CurrentMigrationItemRecord>(),
-    MigrationItem.find({ migrationId: id, itemType: "file", status: "failed" })
-      .sort({ updatedAt: -1 })
-      .limit(10)
-      .select("sourceName sourcePath errorMessage retryCount")
-      .lean<FailedMigrationItemRecord[]>(),
+    getCurrentCopyingItem(cloudflare.DB, id),
+    listFailedFileItems(cloudflare.DB, id, 10),
   ]);
 
   const totalFiles = migration.totalFiles || 0;
@@ -76,11 +43,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const processedFiles = completedFiles + failedFiles;
   const percentage = totalFiles ? Number(((processedFiles / totalFiles) * 100).toFixed(1)) : 0;
   const failedItems = failedItemRecords.map((item) => ({
-    id: item._id.toString(),
-    name: item.sourceName ?? "Untitled file",
-    path: item.sourcePath ?? item.sourceName ?? "Untitled file",
+    id: item.id,
+    name: item.sourceName || "Untitled file",
+    path: item.sourcePath || item.sourceName || "Untitled file",
     error: item.errorMessage,
-    retryCount: item.retryCount ?? 0,
+    retryCount: item.retryCount || 0,
   }));
 
   return NextResponse.json({
