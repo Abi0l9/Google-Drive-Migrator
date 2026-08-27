@@ -6,6 +6,13 @@ on:
       - feat/cloudflare-free-runtime
     paths:
       - .github/workflows/deploy-cloudflare-jobs.yml
+      - package.json
+      - package-lock.json
+      - wrangler.jobs.jsonc
+      - cloudflare/jobs/**
+      - lib/cloudflare/**
+      - lib/google/**
+      - lib/crypto.ts
 
 permissions:
   contents: read
