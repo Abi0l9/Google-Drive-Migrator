@@ -6,6 +6,20 @@ on:
       - feat/cloudflare-free-runtime
     paths:
       - .github/workflows/validate-cloudflare-web.yml
+      - app/**
+      - auth.ts
+      - components/**
+      - lib/cloudflare/**
+      - lib/google/**
+      - lib/crypto.ts
+      - lib/migration/**
+      - types/**
+      - next.config.ts
+      - open-next.config.ts
+      - wrangler.jsonc
+      - wrangler.jobs.jsonc
+      - package.json
+      - package-lock.json
 
 permissions:
   contents: read
@@ -80,5 +94,3 @@ jobs:
           ls -lh .open-next/worker.js
           echo "Dry-run output:"
           find .wrangler-dry -maxdepth 2 -type f -printf '%p %k KiB\n' | sort
-
-# Rerun after Cloudflare runtime type compatibility fixes.
