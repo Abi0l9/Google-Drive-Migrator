@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { auth } from "@/auth";
 import { SignInButton } from "@/components/auth-actions";
+import { GdmBrand } from "@/components/brand";
 import { ProgressPanel } from "@/components/progress-panel";
 import { Card } from "@/components/ui";
 import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
@@ -29,13 +31,21 @@ export default async function MigrationPage({ params }: MigrationPageProps) {
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-5xl px-6 py-10">
+    <main className="mx-auto min-h-screen max-w-5xl px-6 py-8 sm:py-10">
       <div className="mb-8 flex items-center justify-between gap-4">
-        <div>
-          <p className="font-semibold uppercase tracking-[0.2em] text-blue-600">Migration</p>
-          <h1 className="text-3xl font-bold text-slate-950">Progress</h1>
+        <div className="space-y-4">
+          <GdmBrand compact priority />
+          <div>
+            <p className="font-semibold uppercase tracking-[0.2em] text-blue-600">Migration</p>
+            <h1 className="text-3xl font-bold text-slate-950">Progress</h1>
+          </div>
         </div>
-        {!session?.user?.email ? <SignInButton disabled={!googleOAuthConfigured} /> : null}
+        <div className="flex items-center gap-3">
+          {session?.user?.email ? (
+            <Link href="/dashboard" className="text-sm font-medium text-slate-600 hover:text-slate-950">Dashboard</Link>
+          ) : null}
+          {!session?.user?.email ? <SignInButton disabled={!googleOAuthConfigured} /> : null}
+        </div>
       </div>
 
       {session?.user?.email ? (
