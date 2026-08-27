@@ -1,0 +1,29 @@
+name: Diagnose Live Auth
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - .github/workflows/diagnose-live-auth.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe Auth.js endpoints
+        shell: bash
+        run: |
+          set -u
+          base="https://gdm-web.realk9sh.workers.dev"
+          for path in "/api/auth/providers" "/api/auth/csrf" "/api/auth/signin"; do
+            echo "===== $path ====="
+            curl --silent --show-error --location --max-redirs 0 -D - "$base$path" -o /tmp/body || true
+            echo "--- body ---"
+            cat /tmp/body || true
+            echo
+          done
