@@ -33,14 +33,6 @@
       }
     ]
   },
-  "secrets": {
-    "required": [
-      "GOOGLE_API_KEY",
-      "GOOGLE_CLIENT_ID",
-      "GOOGLE_CLIENT_SECRET",
-      "TOKEN_ENCRYPTION_KEY"
-    ]
-  },
   "vars": {
     "GDM_ZERO_COST_MODE": "true",
     "GDM_DAILY_QUEUE_MESSAGE_BUDGET": "2200"
