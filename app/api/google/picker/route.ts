@@ -19,7 +19,7 @@ export async function GET() {
 
   if (!isGooglePickerConfigured()) {
     return NextResponse.json(
-      { error: "Google Picker is not configured. Paste a destination folder URL or ID instead." },
+      { error: "Google Drive destination selection is temporarily unavailable." },
       { status: 503, headers: noStoreHeaders },
     );
   }
