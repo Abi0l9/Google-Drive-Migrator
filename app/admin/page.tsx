@@ -1,8 +1,5 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
 import { Card } from "@/components/ui";
 import { connectDb } from "@/lib/db";
-import { isAdminEmail } from "@/lib/env";
 import { formatBytes } from "@/lib/format";
 import {
   getMigrationWorkerHeartbeat,
@@ -71,9 +68,6 @@ async function loadQueueHealth(): Promise<QueueHealth> {
 }
 
 export default async function AdminPage() {
-  const session = await auth();
-  if (!isAdminEmail(session?.user?.email)) redirect("/");
-
   await connectDb();
 
   const [totalUsers, totalMigrations, activeMigrations, failedMigrations, totalsResult, queueHealth] = await Promise.all([
