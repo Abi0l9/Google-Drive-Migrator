@@ -139,7 +139,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folderUrl: url }),
       });
-      const payload = await response.json();
+      const payload = await response.json<FolderAnalysis & { error?: string }>();
       if (!response.ok) {
         setError(payload.error ?? "Unable to analyze folder");
         return;
@@ -235,7 +235,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
           destinationFolderRef: destinationMode === "root" ? "root" : destinationFolderRef.trim(),
         }),
       });
-      const payload = await response.json();
+      const payload = await response.json<{ migrationId: string; error?: string }>();
 
       if (!response.ok) {
         setError(payload.error ?? "Unable to start migration");

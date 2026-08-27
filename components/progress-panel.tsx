@@ -81,7 +81,7 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
 
     try {
       const response = await fetch(`/api/migrations/${migrationId}/${action}`, { method: "POST" });
-      const payload = await response.json();
+      const payload = await response.json<{ error?: string }>();
 
       if (!response.ok) {
         setError(payload.error ?? fallbackError);
@@ -114,7 +114,7 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
 
     try {
       const response = await fetch(`/api/migrations/${migrationId}/retry`, { method: "POST" });
-      const payload = await response.json();
+      const payload = await response.json<{ error?: string }>();
 
       if (!response.ok) {
         setError(payload.error ?? "Unable to retry failed files");

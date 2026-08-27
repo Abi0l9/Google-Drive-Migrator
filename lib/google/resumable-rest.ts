@@ -71,7 +71,7 @@ export async function continueResumableCopy(options: ResumableRestOptions): Prom
       options.marker,
       totalSize,
     );
-    await options.onSession?.(sessionUrl);
+    await options.onSession?.(sessionUrl!);
   }
 
   const maxChunks = Math.min(20, Math.max(1, Math.floor(options.maxChunks ?? WORKER_MAX_CHUNKS_PER_JOB)));
@@ -89,7 +89,7 @@ export async function continueResumableCopy(options: ResumableRestOptions): Prom
       throw new Error(`Source partial download returned ${contentLength} bytes; expected ${expectedLength}`);
     }
 
-    const response = await fetch(sessionUrl, {
+    const response: Response = await fetch(sessionUrl!, {
       method: "PUT",
       headers: {
         "Content-Length": String(expectedLength),
@@ -99,10 +99,10 @@ export async function continueResumableCopy(options: ResumableRestOptions): Prom
       body: source.body,
     });
 
-    const rotatedSessionUrl = response.headers.get("location");
+    const rotatedSessionUrl: string | null = response.headers.get("location");
     if (rotatedSessionUrl && rotatedSessionUrl !== sessionUrl) {
       sessionUrl = rotatedSessionUrl;
-      await options.onSession?.(sessionUrl);
+      await options.onSession?.(sessionUrl!);
     }
 
     if (response.status === 308) {
@@ -125,7 +125,7 @@ export async function continueResumableCopy(options: ResumableRestOptions): Prom
       );
       offset = 0;
       chunksProcessed += 1;
-      await options.onSession?.(sessionUrl);
+      await options.onSession?.(sessionUrl!);
       await options.onProgress?.(0);
       continue;
     }
@@ -134,10 +134,10 @@ export async function continueResumableCopy(options: ResumableRestOptions): Prom
 
     const uploaded = await response.json() as DriveFile;
     await options.onProgress?.(totalSize);
-    return { completed: true, file: uploaded, uploadedBytes: totalSize, sessionUrl };
+    return { completed: true, file: uploaded, uploadedBytes: totalSize, sessionUrl: sessionUrl! };
   }
 
-  return { completed: false, uploadedBytes: offset, sessionUrl };
+  return { completed: false, uploadedBytes: offset, sessionUrl: sessionUrl! };
 }
 
 async function createResumableSession(
@@ -176,7 +176,7 @@ async function createResumableSession(
 }
 
 async function queryResumableSession(sessionUrl: string, totalSize: number) {
-  const response = await fetch(sessionUrl, {
+  const response: Response = await fetch(sessionUrl!, {
     method: "PUT",
     headers: {
       "Content-Length": "0",

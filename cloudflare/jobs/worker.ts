@@ -78,7 +78,7 @@ export default {
       }
     }
   },
-} satisfies ExportedHandler<CloudflareJobsEnv>;
+} satisfies ExportedHandler<CloudflareJobsEnv, MigrationJob>;
 
 async function processJob(env: CloudflareJobsEnv, message: Message<MigrationJob>) {
   switch (message.body.type) {
@@ -405,7 +405,7 @@ async function processTransferFile(
     },
     onProgress: async (uploadedBytes) => {
       item.uploadedBytes = uploadedBytes;
-      await updateUploadState(env, item, uploadedBytes, item.encryptedUploadSessionUrl);
+      await updateUploadState(env, item, uploadedBytes, item.encryptedUploadSessionUrl ?? undefined);
     },
     shouldContinue: async () => {
       const latest = await getMigrationById(env.DB, migration.id);
