@@ -1,5 +1,7 @@
 # Production Deployment
 
+Canonical public URL: `https://gdm.innovvohq.online`
+
 GDM has two long-running application processes plus two managed data services:
 
 1. **Web** — Next.js standalone server. Handles auth, analysis, migration APIs, dashboards, reports, and progress UI.
@@ -45,7 +47,7 @@ GOOGLE_CLOUD_PROJECT_NUMBER=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 NEXTAUTH_SECRET=
-NEXTAUTH_URL=https://your-domain.example
+NEXTAUTH_URL=https://gdm.innovvohq.online
 TOKEN_ENCRYPTION_KEY=
 ADMIN_EMAILS=admin@example.com
 MAX_ACTIVE_MIGRATIONS_PER_USER=3
@@ -64,10 +66,12 @@ MAX_ACTIVE_MIGRATIONS_PER_USER=3
 Add this redirect URI to the Google OAuth Web client:
 
 ```text
-https://YOUR_DOMAIN/api/auth/callback/google
+https://gdm.innovvohq.online/api/auth/callback/google
 ```
 
-The production domain must also be allowed by the browser restriction on `GOOGLE_PICKER_API_KEY`.
+`https://gdm.innovvohq.online` must also be allowed by the browser restriction on `GOOGLE_PICKER_API_KEY`.
+
+The underlying deployment-provider hostname is infrastructure only. Use the Innovvo hostname for OAuth configuration, public links, metadata and documentation.
 
 ## Health checks
 
@@ -102,8 +106,8 @@ Start with conservative worker counts because Google Drive quotas apply to the p
 1. Provision MongoDB and Redis with persistent/managed storage.
 2. Configure Google Drive API, Google Picker API, OAuth client, and API keys.
 3. Deploy the worker image with its environment variables.
-4. Deploy the web image and expose port 3000 through HTTPS.
-5. Configure the final OAuth callback and Picker referrer restrictions for the production domain.
+4. Deploy the web image and expose port 3000 through HTTPS behind `https://gdm.innovvohq.online`.
+5. Configure `https://gdm.innovvohq.online/api/auth/callback/google` and the matching Picker referrer restriction.
 6. Verify `/api/health` returns HTTP 200 and reports a fresh worker heartbeat.
 7. Sign in, choose a destination with Picker, and run a small migration before testing large/resumable files.
 8. Add an operator email to `ADMIN_EMAILS` and verify `/admin` queue and worker health.
