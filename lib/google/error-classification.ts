@@ -23,6 +23,8 @@ const PERMANENT_APPLICATION_CODES = new Set([
   "GOOGLE_REAUTH_REQUIRED",
 ]);
 
+const GOOGLE_REAUTH_MESSAGE = "Google Drive access needs to be reconnected. Sign in with Google again, then retry the migration.";
+
 interface ErrorLike {
   code?: unknown;
   status?: unknown;
@@ -68,8 +70,10 @@ export function googleDriveErrorDetails(error: unknown) {
   const response = candidate?.response;
   const status = numberValue(response?.status) ?? numberValue(candidate?.status) ?? statusFromMessage(candidate?.message);
   const reason = reasonFromPayload(response?.data);
-  const networkCode = typeof candidate?.code === "string" ? candidate.code : undefined;
-  const message = typeof candidate?.message === "string" ? candidate.message : "Google Drive request failed";
+  const rawCode = typeof candidate?.code === "string" ? candidate.code : undefined;
+  const networkCode = rawCode ?? (status === 401 ? "GOOGLE_REAUTH_REQUIRED" : undefined);
+  const rawMessage = typeof candidate?.message === "string" ? candidate.message : "Google Drive request failed";
+  const message = status === 401 ? GOOGLE_REAUTH_MESSAGE : rawMessage;
 
   return { status, reason, networkCode, message };
 }
