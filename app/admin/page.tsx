@@ -16,7 +16,19 @@ export default async function AdminPage() {
     .filter(Boolean);
   if (!session?.user?.email || !adminEmails.includes(session.user.email.toLowerCase())) redirect("/");
 
-  const [users, migrations, active, failed, totals, actionableItems, failedItems, usage, lastBatch, lastSuccess] = await Promise.all([
+  const [
+    users,
+    migrations,
+    active,
+    failed,
+    totals,
+    actionableItems,
+    failedItems,
+    usage,
+    lastBatch,
+    lastSuccess,
+    workerFreshness,
+  ] = await Promise.all([
     cloudflare.DB.prepare("SELECT COUNT(*) AS count FROM users").first<{ count: number }>(),
     cloudflare.DB.prepare("SELECT COUNT(*) AS count FROM migrations").first<{ count: number }>(),
     cloudflare.DB.prepare(`SELECT COUNT(*) AS count FROM migrations WHERE status IN (${ACTIVE_STATUSES})`).first<{ count: number }>(),
@@ -36,14 +48,21 @@ export default async function AdminPage() {
     getTodayUsage(cloudflare.DB),
     getRuntimeActivity(cloudflare.DB, "jobs:last_batch"),
     getRuntimeActivity(cloudflare.DB, "jobs:last_success"),
+    cloudflare.DB.prepare(`
+      SELECT EXISTS(
+        SELECT 1
+        FROM runtime_activity
+        WHERE key = 'jobs:last_batch'
+          AND datetime(updated_at) >= datetime('now', '-5 minutes')
+      ) AS active
+    `).first<{ active: number }>(),
   ]);
 
   const queueBudget = Math.max(1, Number(cloudflare.GDM_DAILY_QUEUE_MESSAGE_BUDGET ?? 2200) || 2200);
   const queueUsed = usage?.queueMessages ?? 0;
   const backlog = actionableItems?.count ?? 0;
   const lastBatchAt = lastBatch?.updatedAt ?? null;
-  const lastBatchMs = lastBatchAt ? new Date(lastBatchAt).getTime() : 0;
-  const workerRecentlyActive = lastBatchMs > 0 && Date.now() - lastBatchMs < 5 * 60_000;
+  const workerRecentlyActive = Boolean(workerFreshness?.active);
   const workerBacklogAlert = backlog > 0 && !workerRecentlyActive;
 
   const metrics = [
