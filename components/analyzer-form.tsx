@@ -5,7 +5,7 @@ import { GoogleReconnectLink } from "@/components/google-reconnect-link";
 import { Button, Card } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
 import { GOOGLE_REAUTH_REQUIRED } from "@/lib/google/auth-errors";
-import type { FolderAnalysis } from "@/types/migration";
+import type { SignedFolderAnalysis } from "@/types/migration";
 
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 const GOOGLE_API_SCRIPT = "https://apis.google.com/js/api.js";
@@ -127,7 +127,7 @@ function loadGooglePickerApi() {
 
 export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormProps) {
   const [url, setUrl] = useState("");
-  const [analysis, setAnalysis] = useState<FolderAnalysis | null>(null);
+  const [analysis, setAnalysis] = useState<SignedFolderAnalysis | null>(null);
   const [destinationMode, setDestinationMode] = useState<"root" | "folder">("root");
   const [destinationFolderRef, setDestinationFolderRef] = useState("");
   const [pickedDestinationName, setPickedDestinationName] = useState<string | null>(null);
