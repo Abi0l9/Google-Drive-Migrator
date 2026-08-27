@@ -1,0 +1,87 @@
+name: Fix Cloudflare Type Compatibility
+
+on:
+  push:
+    branches:
+      - feat/cloudflare-free-runtime
+    paths:
+      - .github/workflows/fix-cloudflare-types.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: feat/cloudflare-free-runtime
+
+      - name: Apply type compatibility fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          worker = Path('cloudflare/jobs/worker.ts')
+          text = worker.read_text()
+          text = text.replace(
+              '} satisfies ExportedHandler<CloudflareJobsEnv>;',
+              '} satisfies ExportedHandler<CloudflareJobsEnv, MigrationJob>;'
+          )
+          text = text.replace(
+              'await updateUploadState(env, item, uploadedBytes, item.encryptedUploadSessionUrl);',
+              'await updateUploadState(env, item, uploadedBytes, item.encryptedUploadSessionUrl ?? undefined);'
+          )
+          worker.write_text(text)
+
+          analyzer = Path('components/analyzer-form.tsx')
+          text = analyzer.read_text()
+          old = 'const payload = await response.json();'
+          text = text.replace(old, 'const payload = await response.json<FolderAnalysis & { error?: string }>();', 1)
+          text = text.replace(old, 'const payload = await response.json<{ migrationId: string; error?: string }>();', 1)
+          analyzer.write_text(text)
+
+          progress = Path('components/progress-panel.tsx')
+          text = progress.read_text()
+          text = text.replace(
+              'const payload = await response.json();',
+              'const payload = await response.json<{ error?: string }>();'
+          )
+          progress.write_text(text)
+
+          resumable = Path('lib/google/resumable-rest.ts')
+          text = resumable.read_text()
+          text = text.replace(
+              'const response = await fetch(sessionUrl, {',
+              'const response: Response = await fetch(sessionUrl!, {'
+          )
+          text = text.replace(
+              'const rotatedSessionUrl = response.headers.get("location");',
+              'const rotatedSessionUrl: string | null = response.headers.get("location");'
+          )
+          text = text.replace('await options.onSession?.(sessionUrl);', 'await options.onSession?.(sessionUrl!);')
+          text = text.replace(
+              'return { completed: true, file: uploaded, uploadedBytes: totalSize, sessionUrl };',
+              'return { completed: true, file: uploaded, uploadedBytes: totalSize, sessionUrl: sessionUrl! };'
+          )
+          text = text.replace(
+              'return { completed: false, uploadedBytes: offset, sessionUrl };',
+              'return { completed: false, uploadedBytes: offset, sessionUrl: sessionUrl! };'
+          )
+          resumable.write_text(text)
+          PY
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloudflare/jobs/worker.ts components/analyzer-form.tsx components/progress-panel.tsx lib/google/resumable-rest.ts
+          git diff --cached --check
+          git commit -m "Fix Cloudflare runtime type compatibility"
+          git push origin HEAD:feat/cloudflare-free-runtime
