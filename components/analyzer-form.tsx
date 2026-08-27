@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { GoogleReconnectLink } from "@/components/google-reconnect-link";
 import { Button, Card } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
+import { GOOGLE_REAUTH_REQUIRED } from "@/lib/google/auth-errors";
 import type { FolderAnalysis } from "@/types/migration";
 
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
@@ -61,6 +63,12 @@ interface PickerBootstrap {
   developerKey: string;
   appId: string;
   error?: string;
+  code?: string;
+}
+
+interface ApiErrorPayload {
+  error?: string;
+  code?: string;
 }
 
 let pickerApiPromise: Promise<PickerNamespace> | null = null;
@@ -124,6 +132,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
   const [destinationFolderRef, setDestinationFolderRef] = useState("");
   const [pickedDestinationName, setPickedDestinationName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reauthRequired, setReauthRequired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [pickingDestination, setPickingDestination] = useState(false);
@@ -131,12 +140,14 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
   function updateSourceUrl(nextUrl: string) {
     setUrl(nextUrl);
     setError(null);
+    setReauthRequired(false);
     if (analysis) setAnalysis(null);
   }
 
   async function analyze() {
     setLoading(true);
     setError(null);
+    setReauthRequired(false);
     setAnalysis(null);
 
     try {
@@ -166,6 +177,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
 
     setPickingDestination(true);
     setError(null);
+    setReauthRequired(false);
 
     try {
       const [picker, response] = await Promise.all([
@@ -175,7 +187,9 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
       const bootstrap = await response.json() as PickerBootstrap;
 
       if (!response.ok) {
-        throw new Error(bootstrap.error ?? "Unable to open Google Picker");
+        setError(bootstrap.error ?? "Unable to open Google Picker");
+        setReauthRequired(bootstrap.code === GOOGLE_REAUTH_REQUIRED);
+        return;
       }
 
       const view = new picker.DocsView(picker.ViewId.DOCS)
@@ -233,6 +247,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
 
     setCreating(true);
     setError(null);
+    setReauthRequired(false);
 
     try {
       const response = await fetch("/api/migrations", {
@@ -245,13 +260,18 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
           destinationFolderRef: destinationMode === "root" ? "root" : destinationFolderRef,
         }),
       });
-      const payload = await response.json();
+      const payload = await response.json() as ApiErrorPayload & { migrationId?: string };
 
       if (!response.ok) {
         setError(payload.error ?? "Unable to start migration");
+        setReauthRequired(payload.code === GOOGLE_REAUTH_REQUIRED);
         return;
       }
 
+      if (!payload.migrationId) {
+        setError("Migration started without a migration ID. Try again.");
+        return;
+      }
       window.location.href = `/migrations/${payload.migrationId}`;
     } catch {
       setError("Unable to start the migration. Check your connection and try again.");
@@ -283,6 +303,12 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
       <Button onClick={analyze} disabled={loading || !url.trim()}>{loading ? "Analyzing..." : "Analyze Folder"}</Button>
 
       {error ? <p role="alert" aria-live="polite" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+      {reauthRequired ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="mb-3 text-sm text-amber-900">Your GDM session is still open, but Google Drive permission needs a fresh connection.</p>
+          <GoogleReconnectLink redirectTo="/" />
+        </div>
+      ) : null}
 
       {analysis ? (
         <div className="space-y-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
@@ -305,6 +331,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
                 onChange={() => {
                   setDestinationMode("root");
                   setError(null);
+                  setReauthRequired(false);
                 }}
               />
               My Drive
@@ -316,6 +343,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
                 onChange={() => {
                   setDestinationMode("folder");
                   setError(null);
+                  setReauthRequired(false);
                 }}
               />
               Choose an existing folder
