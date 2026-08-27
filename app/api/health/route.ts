@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { connectDb } from "@/lib/db";
-import { getMigrationWorkerHeartbeat, getScanQueue } from "@/lib/queue/migrations";
+import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
+import { getRuntimeActivity } from "@/lib/cloudflare/d1";
 
 export const dynamic = "force-dynamic";
 
@@ -9,30 +9,39 @@ const noStoreHeaders = {
 };
 
 export async function GET() {
-  const [database, redis, workerHeartbeat] = await Promise.allSettled([
-    connectDb(),
-    getScanQueue().getJobCounts("waiting"),
-    getMigrationWorkerHeartbeat(),
-  ]);
+  const cloudflare = getGdmCloudflareEnv();
 
-  const databaseOk = database.status === "fulfilled";
-  const redisOk = redis.status === "fulfilled";
-  const workerHeartbeatAt = workerHeartbeat.status === "fulfilled" ? workerHeartbeat.value : null;
-  const workerOk = Boolean(workerHeartbeatAt);
-  const webReady = databaseOk && redisOk;
-  const fullyOperational = webReady && workerOk;
+  try {
+    await cloudflare.DB.prepare("SELECT 1 AS ok").first();
+    const [lastBatch, lastSuccess] = await Promise.all([
+      getRuntimeActivity(cloudflare.DB, "jobs:last_batch"),
+      getRuntimeActivity(cloudflare.DB, "jobs:last_success"),
+    ]);
 
-  return NextResponse.json(
-    {
-      status: fullyOperational ? "ok" : webReady ? "degraded" : "unavailable",
-      database: databaseOk ? "ok" : "unavailable",
-      queue: redisOk ? "ok" : "unavailable",
-      worker: workerOk ? "ok" : "unavailable",
-      workerHeartbeatAt,
-    },
-    {
-      status: webReady ? 200 : 503,
-      headers: noStoreHeaders,
-    },
-  );
+    return NextResponse.json(
+      {
+        status: "ok",
+        database: "ok",
+        queue: cloudflare.MIGRATION_QUEUE ? "ok" : "unavailable",
+        worker: lastBatch ? "active" : "idle",
+        workerLastBatchAt: lastBatch?.updatedAt ?? null,
+        workerLastSuccessAt: lastSuccess?.updatedAt ?? null,
+        runtime: "cloudflare-workers-free",
+      },
+      { status: cloudflare.MIGRATION_QUEUE ? 200 : 503, headers: noStoreHeaders },
+    );
+  } catch {
+    return NextResponse.json(
+      {
+        status: "unavailable",
+        database: "unavailable",
+        queue: cloudflare.MIGRATION_QUEUE ? "ok" : "unavailable",
+        worker: "unknown",
+        workerLastBatchAt: null,
+        workerLastSuccessAt: null,
+        runtime: "cloudflare-workers-free",
+      },
+      { status: 503, headers: noStoreHeaders },
+    );
+  }
 }
