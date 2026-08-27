@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - feat/cloudflare-free-runtime
+      - feat/gdm-branding
     paths:
       - .github/workflows/validate-cloudflare-web.yml
       - app/**
       - auth.ts
       - components/**
+      - public/**
       - cloudflare/migrations/**
       - lib/cloudflare/**
       - lib/google/**
