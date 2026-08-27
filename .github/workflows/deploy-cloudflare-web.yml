@@ -8,6 +8,7 @@ on:
       - app/**
       - auth.ts
       - components/**
+      - cloudflare/migrations/**
       - lib/**
       - next.config.ts
       - open-next.config.ts
@@ -63,6 +64,9 @@ jobs:
 
       - name: Build OpenNext Worker
         run: npm run cf:build
+
+      - name: Apply D1 migrations
+        run: npx wrangler@4.125.0 d1 migrations apply gdm --remote --config wrangler.jsonc
 
       - name: Deploy gdm-web
         run: npx wrangler@4.125.0 deploy --config wrangler.jsonc
