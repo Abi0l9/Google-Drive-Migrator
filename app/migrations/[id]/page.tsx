@@ -12,22 +12,36 @@ interface MigrationPageProps {
   params: Promise<{ id: string }>;
 }
 
+interface MigrationSummary {
+  status?: string;
+  destinationRootFolderId?: string;
+  sourceFolderName?: string;
+}
+
 const reportStatuses = new Set(["completed", "failed", "cancelled"]);
 
 export default async function MigrationPage({ params }: MigrationPageProps) {
   const session = await auth();
   const googleOAuthConfigured = isGoogleOAuthConfigured();
   const { id } = await params;
-  let reportAvailable = false;
+  let migrationSummary: MigrationSummary | null = null;
 
   if (session?.user?.email && isValidObjectId(id)) {
     await connectDb();
     const user = await User.findOne({ email: session.user.email }).select("_id").lean<{ _id: unknown }>();
     if (user) {
-      const migration = await Migration.findOne({ _id: id, userId: user._id }).select("status").lean<{ status?: string }>();
-      reportAvailable = Boolean(migration?.status && reportStatuses.has(migration.status));
+      migrationSummary = await Migration.findOne({ _id: id, userId: user._id })
+        .select("status destinationRootFolderId sourceFolderName")
+        .lean<MigrationSummary | null>();
     }
   }
+
+  const reportAvailable = Boolean(
+    migrationSummary?.status && reportStatuses.has(migrationSummary.status),
+  );
+  const destinationDriveUrl = migrationSummary?.destinationRootFolderId
+    ? `https://drive.google.com/drive/folders/${encodeURIComponent(migrationSummary.destinationRootFolderId)}`
+    : null;
 
   return (
     <main className="mx-auto min-h-screen max-w-5xl px-6 py-10">
@@ -42,6 +56,28 @@ export default async function MigrationPage({ params }: MigrationPageProps) {
       {session?.user?.email ? (
         <div className="space-y-5">
           <ProgressPanel migrationId={id} />
+
+          {destinationDriveUrl ? (
+            <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="font-semibold text-slate-950">Destination folder</h2>
+                <p className="text-sm text-slate-600">
+                  {migrationSummary?.sourceFolderName
+                    ? `${migrationSummary.sourceFolderName} is available in your Google Drive.`
+                    : "Your migrated folder is available in Google Drive."}
+                </p>
+              </div>
+              <a
+                href={destinationDriveUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="w-fit rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Open in Google Drive ↗
+              </a>
+            </Card>
+          ) : null}
+
           {reportAvailable ? (
             <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>

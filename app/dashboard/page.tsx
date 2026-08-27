@@ -10,6 +10,7 @@ interface DashboardMigration {
   _id: { toString(): string };
   sourceFolderName: string;
   status: string;
+  destinationRootFolderId?: string;
   totalFiles?: number;
   completedFiles?: number;
   failedFiles?: number;
@@ -39,6 +40,7 @@ export default async function DashboardPage() {
     <main className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-8 flex items-center justify-between gap-4">
         <div>
+          <p className="mb-1 text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">GDM</p>
           <h1 className="mb-2 text-3xl font-bold">Migration Dashboard</h1>
           <p className="text-slate-600">Signed in as {session?.user?.email ?? "guest"}.</p>
         </div>
@@ -53,17 +55,39 @@ export default async function DashboardPage() {
         <h2 className="text-xl font-semibold text-slate-950">Recent Migrations</h2>
         {migrations.length ? (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-            {migrations.map((migration) => (
-              <a
-                key={migration._id.toString()}
-                href={`/migrations/${migration._id.toString()}`}
-                className="grid gap-2 border-b border-slate-100 p-4 text-sm last:border-b-0 hover:bg-slate-50 md:grid-cols-[1fr_auto_auto]"
-              >
-                <span className="font-medium text-slate-950">{migration.sourceFolderName}</span>
-                <span className="capitalize text-slate-600">{migration.status}</span>
-                <span className="text-slate-500">{migration.completedFiles ?? 0}/{migration.totalFiles ?? 0} files</span>
-              </a>
-            ))}
+            {migrations.map((migration) => {
+              const migrationId = migration._id.toString();
+              const destinationDriveUrl = migration.destinationRootFolderId
+                ? `https://drive.google.com/drive/folders/${encodeURIComponent(migration.destinationRootFolderId)}`
+                : null;
+
+              return (
+                <div
+                  key={migrationId}
+                  className="grid gap-3 border-b border-slate-100 p-4 text-sm last:border-b-0 hover:bg-slate-50 md:grid-cols-[1fr_auto_auto_auto] md:items-center"
+                >
+                  <a href={`/migrations/${migrationId}`} className="font-medium text-slate-950 hover:text-blue-700">
+                    {migration.sourceFolderName}
+                  </a>
+                  <span className="capitalize text-slate-600">{migration.status}</span>
+                  <span className="text-slate-500">{migration.completedFiles ?? 0}/{migration.totalFiles ?? 0} files</span>
+                  {destinationDriveUrl ? (
+                    <a
+                      href={destinationDriveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-fit rounded-lg border border-slate-200 bg-white px-3 py-2 font-medium text-slate-700 hover:border-blue-200 hover:text-blue-700"
+                    >
+                      Open in Drive ↗
+                    </a>
+                  ) : (
+                    <a href={`/migrations/${migrationId}`} className="font-medium text-blue-700 hover:text-blue-800">
+                      View progress
+                    </a>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <Card><p className="text-sm text-slate-600">No migrations yet.</p></Card>
