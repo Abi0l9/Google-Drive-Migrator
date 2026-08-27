@@ -11,7 +11,7 @@
     {
       "binding": "DB",
       "database_name": "gdm",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "1549ec77-9609-4976-9f60-583436a8826f",
       "migrations_dir": "./cloudflare/migrations"
     }
   ],
