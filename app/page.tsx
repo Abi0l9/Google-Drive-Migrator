@@ -6,10 +6,10 @@ import { Card } from "@/components/ui";
 import { isGoogleOAuthConfigured } from "@/lib/env";
 
 const features = [
-  { icon: FolderOpen, title: "Recursive scans", copy: "Analyze every public subfolder and file before a migration starts." },
-  { icon: Gauge, title: "Live progress", copy: "Track completed files, failures, current file, bytes copied, and ETA." },
-  { icon: RefreshCcw, title: "Retry ready", copy: "Failed transfers are recorded and queued for safe retry without restarting." },
-  { icon: ShieldCheck, title: "Secure OAuth", copy: "Users authenticate with Google; source folders remain untouched." },
+  { icon: FolderOpen, title: "Folder-first", copy: "Analyze a public Drive folder and preserve its nested structure during migration." },
+  { icon: Gauge, title: "Live progress", copy: "Track completed files, failures, current transfer, copied bytes, and ETA." },
+  { icon: RefreshCcw, title: "Safe recovery", copy: "Pause, resume, and retry failed transfers without duplicating completed files." },
+  { icon: ShieldCheck, title: "Focused access", copy: "GDM uses Google's narrow drive.file permission for the destination you choose." },
 ];
 
 export default async function Home() {
@@ -19,7 +19,10 @@ export default async function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-6 py-12">
       <header className="flex items-center justify-between gap-4">
-        <p className="font-semibold text-slate-950">Drive Migrator</p>
+        <div>
+          <p className="text-lg font-bold tracking-tight text-slate-950">GDM</p>
+          <p className="text-xs text-slate-500">Google Drive Migrator</p>
+        </div>
         <div className="flex items-center gap-3">
           {session?.user?.email ? <p className="hidden text-sm text-slate-600 sm:block">{session.user.email}</p> : null}
           {session?.user?.email ? <SignOutButton /> : <SignInButton disabled={!googleOAuthConfigured} />}
@@ -28,14 +31,19 @@ export default async function Home() {
 
       <section className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
         <div className="space-y-6">
-          <p className="font-semibold uppercase tracking-[0.3em] text-blue-600">Google Drive Folder Migrator</p>
+          <p className="font-semibold uppercase tracking-[0.3em] text-blue-600">Move a folder. Keep the structure.</p>
           <h1 className="text-5xl font-bold tracking-tight text-slate-950 md:text-6xl">
-            Copy any public Drive folder into your Google Drive.
+            Move a public Drive folder into your Google Drive.
           </h1>
-          <p className="text-lg leading-8 text-slate-600">
-            Paste a public Google Drive folder URL, review its size and structure, authenticate with Google,
-            choose a destination, and let the migration queue recreate the folder tree and stream files for you.
+          <p className="max-w-2xl text-lg leading-8 text-slate-600">
+            Paste the source folder, review what is inside, choose where it should land, and let GDM recreate the tree and move the files without touching the source.
           </p>
+          <div className="flex flex-wrap gap-2 text-sm text-slate-600">
+            <span className="rounded-full bg-slate-100 px-3 py-1.5">Public source</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1.5">Google Picker destination</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1.5">Pause + resume</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1.5">Migration report</span>
+          </div>
         </div>
         <AnalyzerForm isAuthenticated={Boolean(session?.user?.email)} authConfigured={googleOAuthConfigured} />
       </section>
