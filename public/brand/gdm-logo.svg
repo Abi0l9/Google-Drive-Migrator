@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">GDM</title>
+  <desc id="desc">Google Drive Migrator logo</desc>
+  <defs>
+    <linearGradient id="cloud" x1="32" y1="44" x2="380" y2="326" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1267f4"/>
+      <stop offset="0.48" stop-color="#08b8d8"/>
+      <stop offset="1" stop-color="#1fd75d"/>
+    </linearGradient>
+    <linearGradient id="folder" x1="116" y1="160" x2="284" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1477f8"/>
+      <stop offset="1" stop-color="#082b91"/>
+    </linearGradient>
+    <linearGradient id="blueArrow" x1="36" y1="292" x2="287" y2="181" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1687ff"/>
+      <stop offset="1" stop-color="#35e9ef"/>
+    </linearGradient>
+    <linearGradient id="greenArrow" x1="370" y1="251" x2="207" y2="331" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#12da69"/>
+      <stop offset="1" stop-color="#b8f32c"/>
+    </linearGradient>
+    <linearGradient id="wordBlue" x1="490" y1="102" x2="825" y2="286" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1768f4"/>
+      <stop offset="1" stop-color="#071d5d"/>
+    </linearGradient>
+    <linearGradient id="wordGreen" x1="866" y1="113" x2="1098" y2="277" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0fb9b6"/>
+      <stop offset="1" stop-color="#39d94c"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#03296e" flood-opacity=".18"/>
+    </filter>
+  </defs>
+  <g transform="translate(18 18) scale(.71)" filter="url(#shadow)">
+    <path fill="url(#cloud)" d="M117 351c-50 0-90-39-90-88 0-46 36-84 81-88 14-71 76-124 151-124 72 0 133 49 150 116 43 5 76 42 76 86 0 48-39 87-88 87H117z"/>
+    <path fill="#f7fbff" d="M181 151h117l53 54v116H181z"/>
+    <path fill="#d7ecff" d="M298 151v54h53z"/>
+    <rect x="210" y="190" width="91" height="13" rx="6.5" fill="#8bc8ff"/>
+    <rect x="210" y="217" width="112" height="13" rx="6.5" fill="#8bc8ff"/>
+    <path fill="url(#folder)" d="M139 227h93l24 27h117c18 0 32 14 32 32v116H139c-18 0-32-14-32-32V259c0-18 14-32 32-32z"/>
+    <path fill="url(#blueArrow)" d="M55 350c58 13 124-4 174-42l-25-29c-9-11 1-27 15-23l112 31c13 4 16 20 6 29l-86 76c-11 10-28 0-24-14l9-31c-62 45-139 61-207 40z"/>
+    <path fill="url(#greenArrow)" d="M451 297c-51-11-108 0-155 31l22 28c9 11-2 27-15 22l-103-37c-13-5-14-21-3-29l89-66c12-9 28 2 22 16l-12 29c58-34 125-43 184-26z"/>
+  </g>
+  <text x="430" y="250" fill="url(#wordBlue)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="194" font-weight="800" letter-spacing="-8">GD</text>
+  <text x="795" y="250" fill="url(#wordGreen)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="194" font-weight="800" letter-spacing="-8">M</text>
+  <text x="438" y="326" fill="#38506f" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="48" font-weight="600">Google Drive Migrator</text>
+</svg>
