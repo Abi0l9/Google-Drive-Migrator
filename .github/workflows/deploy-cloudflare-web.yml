@@ -8,6 +8,7 @@ on:
       - app/**
       - auth.ts
       - components/**
+      - public/**
       - cloudflare/migrations/**
       - lib/**
       - next.config.ts
@@ -31,7 +32,7 @@ jobs:
       GOOGLE_CLIENT_ID: build.apps.googleusercontent.com
       GOOGLE_CLIENT_SECRET: build-google-client-secret
       NEXTAUTH_SECRET: build-nextauth-secret-with-sufficient-length
-      NEXTAUTH_URL: https://gdm-web.realk9sh.workers.dev
+      NEXTAUTH_URL: https://gdm.innovvohq.online
       TOKEN_ENCRYPTION_KEY: build-token-encryption-key-with-sufficient-length
       ADMIN_EMAILS: admin@example.com
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -67,6 +68,10 @@ jobs:
 
       - name: Apply D1 migrations
         run: npx wrangler@4.125.0 d1 migrations apply gdm --remote --config wrangler.jsonc
+
+      - name: Sync production auth URL
+        shell: bash
+        run: printf '%s' "$NEXTAUTH_URL" | npx wrangler@4.125.0 secret put NEXTAUTH_URL --config wrangler.jsonc
 
       - name: Deploy gdm-web
         run: npx wrangler@4.125.0 deploy --config wrangler.jsonc
