@@ -20,6 +20,7 @@ const RETRYABLE_NETWORK_CODES = new Set([
 
 const PERMANENT_APPLICATION_CODES = new Set([
   "GDM_UNSUPPORTED_DRIVE_ITEM",
+  "GOOGLE_REAUTH_REQUIRED",
 ]);
 
 interface ErrorLike {
