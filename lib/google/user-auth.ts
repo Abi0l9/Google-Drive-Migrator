@@ -31,9 +31,10 @@ export async function getFreshGoogleAccessToken(user: GoogleTokenUser) {
   const oauth2 = new google.auth.OAuth2(env.googleClientId, env.googleClientSecret);
   oauth2.setCredentials({ refresh_token: refreshToken });
 
-  let response: Awaited<ReturnType<typeof oauth2.getAccessToken>>;
+  let refreshedAccessToken: string | null | undefined;
   try {
-    response = await oauth2.getAccessToken();
+    const response = await oauth2.getAccessToken();
+    refreshedAccessToken = response.token ?? oauth2.credentials.access_token;
   } catch (error) {
     if (isGoogleReauthorizationFailure(error)) {
       throw new GoogleReauthorizationRequiredError();
@@ -41,7 +42,6 @@ export async function getFreshGoogleAccessToken(user: GoogleTokenUser) {
     throw error;
   }
 
-  const refreshedAccessToken = response.token ?? oauth2.credentials.access_token;
   if (!refreshedAccessToken) {
     throw new GoogleReauthorizationRequiredError();
   }
