@@ -8,6 +8,7 @@ Google Drive Folder Migrator (GDM) copies a publicly accessible Google Drive fol
 - Sign in with Google through Auth.js using the narrow `drive.file` scope.
 - Choose an existing destination folder with Google Picker or migrate into My Drive.
 - Recreate nested folder structures in My Drive or the selected Drive folder.
+- Open the migrated destination folder directly from the migration page or dashboard.
 - Stream standard Drive files source-to-destination without writing them to local disk.
 - Export Google Docs to DOCX, Sheets to XLSX, and Slides to PPTX.
 - Use resumable 8 MB chunk uploads for standard files larger than 5 MB.
