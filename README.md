@@ -2,6 +2,8 @@
 
 Google Drive Folder Migrator (GDM) copies a publicly accessible Google Drive folder into an authenticated user's Google Drive without modifying the source folder.
 
+Public app: `https://gdm.innovvohq.online`
+
 ## Current capabilities
 
 - Analyze public Google Drive folder URLs recursively before starting a migration.
@@ -39,9 +41,9 @@ Use one Google Cloud project for the OAuth client, Drive API, and Picker App ID.
 2. Create an OAuth 2.0 Web application client and set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
 3. Add the Auth.js callback URL to the OAuth client's authorized redirect URIs:
    - local: `http://localhost:3000/api/auth/callback/google`
-   - production: `https://YOUR_DOMAIN/api/auth/callback/google`
+   - production: `https://gdm.innovvohq.online/api/auth/callback/google`
 4. Create `GOOGLE_API_KEY` for server-side public-folder Drive reads. Restrict it to the Drive API where possible.
-5. Create a separate browser key for `GOOGLE_PICKER_API_KEY`. Restrict it to the Google Picker API and your allowed HTTP referrers/domains.
+5. Create a separate browser key for `GOOGLE_PICKER_API_KEY`. Restrict it to the Google Picker API and your allowed HTTP referrers/domains, including `https://gdm.innovvohq.online` in production.
 6. Set `GOOGLE_CLOUD_PROJECT_NUMBER` to the numeric Cloud project number. Picker requires this App ID when using the `drive.file` scope.
 7. Configure the OAuth consent screen and add only the Google scopes the app uses: `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/drive.file`.
 
@@ -64,6 +66,8 @@ See `.env.example`. Important values include:
 - `NEXTAUTH_URL`
 - `TOKEN_ENCRYPTION_KEY`
 - `ADMIN_EMAILS` as a comma-separated allowlist
+
+For production, set `NEXTAUTH_URL=https://gdm.innovvohq.online`.
 
 Use a stable, strong `TOKEN_ENCRYPTION_KEY` in every environment that runs the web app or worker. Changing it makes previously encrypted Google tokens and resumable-upload session URLs unreadable.
 
