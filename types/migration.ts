@@ -10,6 +10,10 @@ export interface FolderAnalysis {
   size: number;
 }
 
+export interface SignedFolderAnalysis extends FolderAnalysis {
+  analysisToken: string;
+}
+
 export interface FailedMigrationItem {
   id: string;
   name: string;

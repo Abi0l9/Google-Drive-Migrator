@@ -29,6 +29,7 @@ Status legend:
 - [x] Recursive nested-folder scan
 - [x] File/folder counts and total standard-file bytes
 - [x] Loading and error states
+- [x] Short-lived authenticated analysis proof binds folder counts/bytes to migration creation
 - [~] Cooperative scan cancellation and pause checks
 - [x] Shortcut traversal is not followed, preventing shortcut-based folder cycles
 - [ ] Persist analyzed state across navigation/reloads
@@ -76,6 +77,7 @@ Status legend:
 - [x] Reuse scan records on rescan/retry
 - [x] Server-side deduplication of active source+destination migration creation
 - [x] Paused migrations count as active duplicates
+- [x] Persist UTC-month quota reservations on migration records
 - [~] Transfer leases protect against overlapping resume/retry jobs and stale claims
 - [ ] Retention/cleanup policy for completed migration and item records
 
@@ -179,13 +181,14 @@ Status legend:
 - [x] Progress-polling rate limiting with `Retry-After`
 - [x] Active migration request deduplication
 - [x] Configurable per-user active migration quota, serialized across replicas with Redis creation lock
+- [x] Configurable per-user monthly byte and file quotas, serialized across replicas
+- [x] Signed, expiring folder-analysis proof prevents client-side quota-count forgery
 - [x] Encrypted Google credentials at rest
 - [x] Encrypted resumable-session URLs at rest
 - [x] No OAuth token in Auth.js browser session
 - [x] Admin email allowlist and route protection
 - [x] Picker browser token response uses no-store caching
 - [~] Auth.js secure cookie behavior relies on correctly configured production HTTPS/domain
-- [ ] Per-user data/usage quotas
 - [ ] Content-Security-Policy tuned for Google Picker/Auth assets
 
 ## 12. User dashboard
@@ -194,6 +197,7 @@ Status legend:
 - [x] Links back to migration detail/progress
 - [x] Completed/failed file summary cards
 - [x] Destination shortcut/open-in-Drive action
+- [x] Current monthly byte/file allowance usage
 - [ ] Pagination beyond latest migrations
 - [ ] Filters by status/date
 - [ ] Search by source folder
@@ -228,7 +232,11 @@ Status legend:
 - [x] Workspace export naming tests
 - [x] Migration report CSV/filename formatting tests
 - [x] Active migration quota policy tests
+- [x] Monthly byte/file quota policy and UTC-bucket tests
+- [x] Signed analysis proof expiry, folder-binding, and tamper tests
 - [x] Transfer speed/ETA metric tests
+- [x] Migration control MongoDB + Redis integration tests
+- [x] Queued worker migration integration test with mocked Drive clients
 - [x] CI production dependency audit
 - [x] CI TypeScript check
 - [x] CI ESLint
@@ -237,7 +245,6 @@ Status legend:
 - [x] CI production worker Docker image build
 - [ ] Migration API integration tests with mocked Google APIs
 - [ ] Pause/resume/cancel API integration tests
-- [ ] Worker tests with isolated MongoDB/Redis/Drive clients
 - [ ] End-to-end analyze → Picker → migration → completion test
 - [ ] Load/soak tests with thousands of files and multi-GB transfers
 
@@ -251,6 +258,7 @@ Status legend:
 - [x] Deterministic lockfile-backed dependency installation
 - [x] Health endpoint documentation
 - [x] Encryption-key consistency warning
+- [x] Monthly quota environment/default documentation
 - [~] Queue/worker operations guidance
 - [ ] Screenshotted Google Cloud setup guide
 - [ ] Full troubleshooting guide
@@ -258,8 +266,8 @@ Status legend:
 
 ## 16. Next hardening priorities
 
-- [ ] Add route/worker integration tests
-- [ ] Add per-user data/usage quotas
+- [ ] Add route/API integration tests
+- [x] Add per-user data/usage quotas
 - [ ] Add operational worker/queue alerting
 - [ ] Run large-folder and large-file soak tests
 - [ ] Tune transfer concurrency against observed Google Drive quotas

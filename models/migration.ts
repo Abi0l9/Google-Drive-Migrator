@@ -16,11 +16,16 @@ const MigrationSchema = new Schema(
     failedFiles: { type: Number, default: 0 },
     totalBytes: { type: Number, default: 0 },
     copiedBytes: { type: Number, default: 0 },
+    quotaPeriod: String,
+    quotaChargedBytes: { type: Number, default: 0 },
+    quotaChargedFiles: { type: Number, default: 0 },
     errorMessage: String,
     startedAt: Date,
     completedAt: Date,
   },
   { timestamps: true },
 );
+
+MigrationSchema.index({ userId: 1, quotaPeriod: 1 });
 
 export const Migration = models.Migration ?? model("Migration", MigrationSchema);

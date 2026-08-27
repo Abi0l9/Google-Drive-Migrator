@@ -2,7 +2,9 @@ import { auth } from "@/auth";
 import { SignInButton } from "@/components/auth-actions";
 import { Card } from "@/components/ui";
 import { connectDb } from "@/lib/db";
-import { isGoogleOAuthConfigured } from "@/lib/env";
+import { env, isGoogleOAuthConfigured } from "@/lib/env";
+import { formatBytes } from "@/lib/format";
+import { usagePeriodFor } from "@/lib/migration/quota";
 import { Migration } from "@/models/migration";
 import { User } from "@/models/user";
 
@@ -17,19 +19,43 @@ interface DashboardMigration {
   createdAt?: Date;
 }
 
+interface DashboardUsage {
+  bytes: number;
+  files: number;
+}
+
 export default async function DashboardPage() {
   const session = await auth();
   const googleOAuthConfigured = isGoogleOAuthConfigured();
   let migrations: DashboardMigration[] = [];
+  let monthlyUsage: DashboardUsage = { bytes: 0, files: 0 };
 
   if (session?.user?.email) {
     await connectDb();
     const user = await User.findOne({ email: session.user.email }).select("_id").lean<{ _id: unknown }>();
     if (user) {
-      migrations = await Migration.find({ userId: user._id })
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .lean<DashboardMigration[]>();
+      const [recentMigrations, usageRows] = await Promise.all([
+        Migration.find({ userId: user._id })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .lean<DashboardMigration[]>(),
+        Migration.aggregate<DashboardUsage>([
+          { $match: { userId: user._id, quotaPeriod: usagePeriodFor() } },
+          {
+            $group: {
+              _id: null,
+              bytes: { $sum: "$quotaChargedBytes" },
+              files: { $sum: "$quotaChargedFiles" },
+            },
+          },
+        ]),
+      ]);
+
+      migrations = recentMigrations;
+      monthlyUsage = {
+        bytes: usageRows[0]?.bytes ?? 0,
+        files: usageRows[0]?.files ?? 0,
+      };
     }
   }
 
@@ -46,10 +72,19 @@ export default async function DashboardPage() {
         </div>
         {!session?.user?.email ? <SignInButton disabled={!googleOAuthConfigured} /> : null}
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card><p className="text-sm text-slate-500">Migrations</p><strong className="text-3xl">{migrations.length}</strong></Card>
         <Card><p className="text-sm text-slate-500">Completed Files</p><strong className="text-3xl">{completed}</strong></Card>
         <Card><p className="text-sm text-slate-500">Failed Files</p><strong className="text-3xl">{failed}</strong></Card>
+        <Card>
+          <p className="text-sm text-slate-500">Monthly Allowance</p>
+          <strong className="block text-lg text-slate-950">
+            {formatBytes(monthlyUsage.bytes)} / {formatBytes(env.maxMonthlyTransferBytesPerUser)}
+          </strong>
+          <span className="text-xs text-slate-500">
+            {monthlyUsage.files.toLocaleString()} / {env.maxMonthlyTransferFilesPerUser.toLocaleString()} files · resets UTC monthly
+          </span>
+        </Card>
       </div>
       <section className="mt-8 space-y-3">
         <h2 className="text-xl font-semibold text-slate-950">Recent Migrations</h2>

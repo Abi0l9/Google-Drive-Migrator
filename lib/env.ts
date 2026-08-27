@@ -1,4 +1,8 @@
-import { normalizeActiveMigrationLimit } from "@/lib/migration/quota";
+import {
+  normalizeActiveMigrationLimit,
+  normalizeMonthlyTransferBytesLimit,
+  normalizeMonthlyTransferFilesLimit,
+} from "@/lib/migration/quota";
 
 const adminEmails = (process.env.ADMIN_EMAILS ?? "")
   .split(",")
@@ -16,6 +20,12 @@ export const env = {
   nextAuthSecret: process.env.NEXTAUTH_SECRET ?? "development-secret",
   tokenEncryptionKey: process.env.TOKEN_ENCRYPTION_KEY ?? process.env.NEXTAUTH_SECRET ?? "development-secret",
   maxActiveMigrationsPerUser: normalizeActiveMigrationLimit(process.env.MAX_ACTIVE_MIGRATIONS_PER_USER),
+  maxMonthlyTransferBytesPerUser: normalizeMonthlyTransferBytesLimit(
+    process.env.MAX_MONTHLY_TRANSFER_BYTES_PER_USER,
+  ),
+  maxMonthlyTransferFilesPerUser: normalizeMonthlyTransferFilesLimit(
+    process.env.MAX_MONTHLY_TRANSFER_FILES_PER_USER,
+  ),
   adminEmails,
 };
 
