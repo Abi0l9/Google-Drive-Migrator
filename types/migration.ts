@@ -8,6 +8,7 @@ export interface FolderAnalysis {
   files: number;
   folders: number;
   size: number;
+  analysisToken: string;
 }
 
 export interface FailedMigrationItem {
