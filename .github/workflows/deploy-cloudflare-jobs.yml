@@ -10,6 +10,7 @@ on:
       - package-lock.json
       - wrangler.jobs.jsonc
       - cloudflare/jobs/**
+      - cloudflare/migrations/**
       - lib/cloudflare/**
       - lib/google/**
       - lib/crypto.ts
@@ -21,6 +22,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -37,6 +41,9 @@ jobs:
 
       - name: Generate jobs binding types
         run: npx wrangler@4.125.0 types --config wrangler.jobs.jsonc --env-interface CloudflareJobsEnv cloudflare-jobs-env.d.ts
+
+      - name: Apply D1 migrations
+        run: npx wrangler@4.125.0 d1 migrations apply gdm --remote --config wrangler.jobs.jsonc
 
       - name: Deploy jobs Worker
         uses: cloudflare/wrangler-action@v3
