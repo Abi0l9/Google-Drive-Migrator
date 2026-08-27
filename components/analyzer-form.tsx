@@ -257,6 +257,7 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
           sourceFolderId: analysis.folderId,
           sourceFolderUrl: url.trim(),
           sourceFolderName: analysis.folderName,
+          analysisToken: analysis.analysisToken,
           destinationFolderRef: destinationMode === "root" ? "root" : destinationFolderRef,
         }),
       });
