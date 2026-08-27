@@ -38,7 +38,7 @@ jobs:
       GOOGLE_CLIENT_ID: ci.apps.googleusercontent.com
       GOOGLE_CLIENT_SECRET: ci-google-client-secret
       NEXTAUTH_SECRET: ci-nextauth-secret-with-sufficient-length
-      NEXTAUTH_URL: https://gdm-web.realk9sh.workers.dev
+      NEXTAUTH_URL: https://gdm.innovvohq.online
       TOKEN_ENCRYPTION_KEY: ci-token-encryption-key-with-sufficient-length
       ADMIN_EMAILS: admin@example.com
     steps:
