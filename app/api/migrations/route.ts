@@ -10,11 +10,13 @@ import {
 import { FreeTierCapacityError, nextUtcReset } from "@/lib/cloudflare/free-tier";
 import { publishMigrationJob } from "@/lib/cloudflare/queue";
 import { getGdmCloudflareEnv } from "@/lib/cloudflare/context";
+import { saveManualDedupSelection } from "@/lib/cloudflare/manual-dedup";
 import {
   extractDriveFolderId,
   validateDestinationFolder,
 } from "@/lib/google/drive-rest";
 import { getFreshGoogleAccessTokenD1 } from "@/lib/google/user-auth-d1";
+import { getAuthorizedDestinationItem } from "@/lib/google/selected-destination";
 import { normalizeActiveMigrationLimit } from "@/lib/migration/quota";
 
 const CreateMigration = z.object({
@@ -22,6 +24,8 @@ const CreateMigration = z.object({
   sourceFolderUrl: z.string().url(),
   sourceFolderName: z.string().min(1),
   destinationFolderRef: z.string().min(1).max(2048),
+  mergeIntoDestination: z.boolean().optional().default(false),
+  existingDestinationItemIds: z.array(z.string().regex(/^[a-zA-Z0-9_-]+$/)).max(25).optional().default([]),
 });
 
 export async function POST(request: Request) {
@@ -50,14 +54,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Too many migration requests. Try again in a minute." }, { status: 429 });
   }
 
+  let accessToken: string;
   let destination: { id: string; name: string };
   try {
-    const accessToken = await getFreshGoogleAccessTokenD1(cloudflare, user);
+    accessToken = await getFreshGoogleAccessTokenD1(cloudflare, user);
     destination = await validateDestinationFolder(accessToken, parsed.data.destinationFolderRef);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to access destination folder" },
       { status: 403 },
+    );
+  }
+
+  if (parsed.data.mergeIntoDestination && destination.id === "root") {
+    return NextResponse.json(
+      { error: "Choose a specific existing Drive folder to use partial-copy merge mode." },
+      { status: 400 },
+    );
+  }
+
+  if (parsed.data.existingDestinationItemIds.length && !parsed.data.mergeIntoDestination) {
+    return NextResponse.json(
+      { error: "Enable partial-copy merge mode before selecting already-copied items." },
+      { status: 400 },
+    );
+  }
+
+  const selectedDestinationItems = [];
+  try {
+    for (const itemId of parsed.data.existingDestinationItemIds) {
+      selectedDestinationItems.push(await getAuthorizedDestinationItem(accessToken, itemId));
+    }
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to verify already-copied Drive items" },
+      { status: 400 },
     );
   }
 
@@ -86,6 +117,16 @@ export async function POST(request: Request) {
   }
 
   if (creation.reused) {
+    if (parsed.data.mergeIntoDestination || parsed.data.existingDestinationItemIds.length) {
+      return NextResponse.json(
+        {
+          migrationId: creation.migration.id,
+          status: creation.migration.status,
+          error: "An active migration already exists for this source and destination. Cancel it before starting partial-copy merge mode.",
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({
       migrationId: creation.migration.id,
       status: creation.migration.status,
@@ -94,6 +135,19 @@ export async function POST(request: Request) {
   }
 
   const migration = creation.migration;
+  try {
+    await saveManualDedupSelection(
+      cloudflare.DB,
+      migration.id,
+      parsed.data.mergeIntoDestination,
+      selectedDestinationItems,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to save partial-copy selections";
+    await setMigrationStatus(cloudflare.DB, migration.id, "paused", { errorMessage: message });
+    return NextResponse.json({ migrationId: migration.id, status: "paused", error: message }, { status: 500 });
+  }
+
   try {
     await publishMigrationJob(cloudflare, {
       type: "scan-folder",

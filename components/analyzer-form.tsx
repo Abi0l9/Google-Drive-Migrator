@@ -19,6 +19,7 @@ interface PickerView {
   setMimeTypes(mimeTypes: string): PickerView;
   setMode(mode: string): PickerView;
   setEnableDrives(enabled: boolean): PickerView;
+  setParent(parentId: string): PickerView;
 }
 
 interface PickerInstance {
@@ -123,10 +124,13 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
   const [destinationMode, setDestinationMode] = useState<"root" | "folder">("root");
   const [destinationFolderRef, setDestinationFolderRef] = useState("");
   const [pickedDestinationName, setPickedDestinationName] = useState<string | null>(null);
+  const [mergeIntoDestination, setMergeIntoDestination] = useState(false);
+  const [existingDestinationItems, setExistingDestinationItems] = useState<Array<{ id: string; name: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [pickingDestination, setPickingDestination] = useState(false);
+  const [pickingExisting, setPickingExisting] = useState(false);
 
   async function analyze() {
     setLoading(true);
@@ -201,6 +205,8 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
               } else {
                 setDestinationFolderRef(folderId);
                 setPickedDestinationName(folderName ?? "Selected Drive folder");
+                setMergeIntoDestination(false);
+                setExistingDestinationItems([]);
               }
               resolve();
             } else if (action === picker.Action.CANCEL) {
@@ -215,6 +221,67 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
       setError(pickerError instanceof Error ? pickerError.message : "Unable to open Google Picker");
     } finally {
       setPickingDestination(false);
+    }
+  }
+
+  async function chooseAlreadyCopiedItems() {
+    if (!isAuthenticated) {
+      setError("Sign in with Google before choosing already-copied items.");
+      return;
+    }
+    if (destinationMode !== "folder" || !destinationFolderRef.trim()) {
+      setError("Choose the partially filled destination folder first.");
+      return;
+    }
+
+    setPickingExisting(true);
+    setError(null);
+
+    try {
+      const [picker, response] = await Promise.all([
+        loadGooglePickerApi(),
+        fetch("/api/google/picker", { cache: "no-store" }),
+      ]);
+      const bootstrap = await response.json() as PickerBootstrap;
+      if (!response.ok) throw new Error(bootstrap.error ?? "Unable to open Google Picker");
+
+      const destinationId = destinationFolderRef.trim();
+      const view = new picker.DocsView(picker.ViewId.DOCS)
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true)
+        .setMode(picker.DocsViewMode.LIST)
+        .setParent(destinationId);
+
+      await new Promise<void>((resolve) => {
+        const pickerInstance = new picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(bootstrap.accessToken)
+          .setDeveloperKey(bootstrap.developerKey)
+          .setAppId(bootstrap.appId)
+          .setOrigin(window.location.origin)
+          .setMaxItems(25)
+          .setCallback((data) => {
+            const action = data[picker.Response.ACTION];
+            if (action === picker.Action.PICKED) {
+              const documents = data[picker.Response.DOCUMENTS] as Array<Record<string, string>> | undefined;
+              const items = (documents ?? []).flatMap((document) => {
+                const id = document[picker.Document.ID];
+                const name = document[picker.Document.NAME];
+                return id ? [{ id, name: name ?? "Existing Drive item" }] : [];
+              });
+              setExistingDestinationItems(items);
+              resolve();
+            } else if (action === picker.Action.CANCEL) {
+              resolve();
+            }
+          })
+          .build();
+        pickerInstance.setVisible(true);
+      });
+    } catch (pickerError) {
+      setError(pickerError instanceof Error ? pickerError.message : "Unable to open Google Picker");
+    } finally {
+      setPickingExisting(false);
     }
   }
 
@@ -233,6 +300,8 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
           sourceFolderUrl: url,
           sourceFolderName: analysis.folderName,
           destinationFolderRef: destinationMode === "root" ? "root" : destinationFolderRef.trim(),
+          mergeIntoDestination: destinationMode === "folder" && mergeIntoDestination,
+          existingDestinationItemIds: existingDestinationItems.map((item) => item.id),
         }),
       });
       const payload = await response.json<{ migrationId: string; error?: string }>();
@@ -320,6 +389,8 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
                     onChange={(event) => {
                       setDestinationFolderRef(event.target.value);
                       setPickedDestinationName(null);
+                      setMergeIntoDestination(false);
+                      setExistingDestinationItems([]);
                     }}
                     placeholder="https://drive.google.com/drive/folders/xxxxxxxx"
                     className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
@@ -328,6 +399,39 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
                 <p className="text-xs leading-5 text-slate-500">
                   Picker is recommended because it grants Drive Migrator access only to the folder you choose. Pasted folders must already be accessible to the app.
                 </p>
+
+                <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
+                  <label className="flex items-start gap-2 text-sm text-slate-800">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={mergeIntoDestination}
+                      onChange={(event) => {
+                        setMergeIntoDestination(event.target.checked);
+                        if (!event.target.checked) setExistingDestinationItems([]);
+                      }}
+                    />
+                    <span>
+                      This folder already contains part of the source. Merge the source directly into it instead of creating another wrapper folder.
+                    </span>
+                  </label>
+
+                  {mergeIntoDestination ? (
+                    <div className="space-y-2">
+                      <Button type="button" onClick={chooseAlreadyCopiedItems} disabled={pickingExisting || !pickedDestinationName}>
+                        {pickingExisting ? "Opening Drive..." : "Choose files/folders already copied"}
+                      </Button>
+                      <p className="text-xs leading-5 text-slate-600">
+                        Select up to 25 items already present in this folder. If a copied subfolder contains copied files, select the subfolder and those files too. GDM will reuse only Picker-authorized matches.
+                      </p>
+                      {existingDestinationItems.length ? (
+                        <div className="rounded-lg bg-white px-3 py-2 text-xs text-emerald-700">
+                          {existingDestinationItems.length} already-copied item{existingDestinationItems.length === 1 ? "" : "s"} selected.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </fieldset>

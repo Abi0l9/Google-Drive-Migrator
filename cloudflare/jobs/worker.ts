@@ -34,10 +34,16 @@ import {
 } from "@/lib/cloudflare/jobs";
 import { publishMigrationJob, publishMigrationJobs } from "@/lib/cloudflare/queue";
 import {
+  buildManualDuplicateLookup,
+  findSelectedDestinationItem,
+  getManualDedupOptions,
+} from "@/lib/cloudflare/manual-dedup";
+import {
   DRIVE_FOLDER_MIME_TYPE,
   assertCopyableDriveFile,
   createDestinationFileMetadata,
   createDestinationFolder,
+  destinationFileName,
   findDestinationMigrationItem,
   getPublicDriveFile,
   listPublicDriveChildren,
@@ -122,7 +128,11 @@ async function processScanFolder(
   let destinationFolderId = job.destinationFolderId;
   if (job.sourceFolderId === migration.sourceFolderId) {
     const rootMarker = { migrationId: migration.id, sourceId: migration.sourceFolderId };
+    const manualOptions = await getManualDedupOptions(env.DB, migration.id);
     let rootId = migration.destinationRootFolderId ?? undefined;
+    if (!rootId && manualOptions.mergeIntoDestination) {
+      rootId = migration.destinationFolderId;
+    }
     if (!rootId) {
       const existing = await findDestinationMigrationItem(
         accessToken,
@@ -140,9 +150,9 @@ async function processScanFolder(
         );
         rootId = created.id;
       }
-      if (!rootId) throw new Error("Unable to create destination migration root folder");
-      await setMigrationRootFolder(env.DB, migration.id, rootId);
     }
+    if (!rootId) throw new Error("Unable to resolve destination migration root folder");
+    if (!migration.destinationRootFolderId) await setMigrationRootFolder(env.DB, migration.id, rootId);
     destinationFolderId = rootId;
   }
 
@@ -180,21 +190,32 @@ async function processScanFolder(
 
     if (source.mimeType === DRIVE_FOLDER_MIME_TYPE) {
       const marker = { migrationId: migration.id, sourceId: source.id };
-      let destinationChild = await findDestinationMigrationItem(
+      let destinationChildId = (await findDestinationMigrationItem(
         accessToken,
         destinationFolderId,
         marker,
         DRIVE_FOLDER_MIME_TYPE,
-      );
-      if (!destinationChild?.id) {
-        destinationChild = await createDestinationFolder(
+      ))?.id;
+
+      if (!destinationChildId) {
+        destinationChildId = (await findSelectedDestinationItem(
+          env.DB,
+          migration.id,
+          destinationFolderId,
+          { name: sourceName, mimeType: DRIVE_FOLDER_MIME_TYPE },
+        ))?.destinationFileId;
+      }
+
+      if (!destinationChildId) {
+        const created = await createDestinationFolder(
           accessToken,
           sourceName,
           destinationFolderId,
           marker,
         );
+        destinationChildId = created.id;
       }
-      if (!destinationChild.id) throw new Error(`Unable to create destination folder for ${sourcePath}`);
+      if (!destinationChildId) throw new Error(`Unable to create destination folder for ${sourcePath}`);
 
       const childItem = await upsertMigrationItem(env.DB, {
         migrationId: migration.id,
@@ -202,7 +223,7 @@ async function processScanFolder(
         sourceName,
         sourceMimeType: DRIVE_FOLDER_MIME_TYPE,
         sourcePath,
-        destinationFolderId: destinationChild.id,
+        destinationFolderId: destinationChildId,
         itemType: "folder",
       });
       if (childItem?.status !== "completed") {
@@ -212,7 +233,7 @@ async function processScanFolder(
           sourceFolderId: source.id,
           sourceName,
           sourcePath,
-          destinationFolderId: destinationChild.id,
+          destinationFolderId: destinationChildId,
         });
       }
       continue;
@@ -345,9 +366,10 @@ async function processTransferFile(
   assertCopyableDriveFile(sourceFile);
   const marker = { migrationId: migration.id, sourceId: item.sourceFileId };
   const workspace = sourceFile.mimeType ? workspaceExportConfig[sourceFile.mimeType] : undefined;
+  const parentId = item.destinationFolderId ?? migration.destinationRootFolderId ?? migration.destinationFolderId;
   const existing = await findDestinationMigrationItem(
     accessToken,
-    item.destinationFolderId ?? migration.destinationRootFolderId ?? migration.destinationFolderId,
+    parentId,
     marker,
   );
 
@@ -360,7 +382,21 @@ async function processTransferFile(
     return;
   }
 
-  const parentId = item.destinationFolderId ?? migration.destinationRootFolderId ?? migration.destinationFolderId;
+  const selectedExisting = await findSelectedDestinationItem(
+    env.DB,
+    migration.id,
+    parentId,
+    buildManualDuplicateLookup({
+      name: destinationFileName(sourceFile),
+      size: Number(sourceFile.size ?? item.size ?? 0),
+      workspaceMimeType: workspace?.mimeType,
+    }),
+  );
+  if (selectedExisting?.destinationFileId) {
+    await finishTransferredItem(env, item, selectedExisting.destinationFileId);
+    return;
+  }
+
   if (workspace) {
     let destinationId = existing?.id;
     if (!destinationId) {
