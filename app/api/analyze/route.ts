@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { analyzePublicFolder } from "@/lib/google/drive";
 import { isGoogleApiKeyConfigured } from "@/lib/env";
+import { issueAnalysisProof } from "@/lib/migration/analysis-proof";
 import { rateLimit } from "@/lib/rate-limit";
 
 const AnalyzeRequest = z.object({ folderUrl: z.string().url() });
@@ -21,7 +22,10 @@ export async function POST(request: Request) {
 
   try {
     const analysis = await analyzePublicFolder(parsed.data.folderUrl);
-    return NextResponse.json(analysis);
+    return NextResponse.json({
+      ...analysis,
+      analysisToken: issueAnalysisProof(analysis),
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Folder is not publicly accessible" }, { status: 400 });
   }
