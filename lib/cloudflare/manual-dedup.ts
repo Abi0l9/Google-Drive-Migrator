@@ -1,3 +1,4 @@
+// Picker-authorized dedup keeps GDM on the narrow drive.file OAuth scope.
 export interface SelectedDestinationItem {
   id: string;
   parentId: string;
