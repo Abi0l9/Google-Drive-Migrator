@@ -1,6 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  File,
+  Gauge,
+  LoaderCircle,
+  Pause,
+  Play,
+  RefreshCcw,
+  RotateCcw,
+  ShieldAlert,
+  Square,
+  Timer,
+  XCircle,
+} from "lucide-react";
 import { GoogleReconnectLink } from "@/components/google-reconnect-link";
 import { Button, Card } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
@@ -25,6 +42,25 @@ function formatEta(seconds?: number) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function statusPresentation(status?: string) {
+  switch (status) {
+    case "completed":
+      return { icon: CheckCircle2, label: "Completed", className: "bg-emerald-400/15 text-emerald-200 ring-emerald-300/20" };
+    case "failed":
+      return { icon: XCircle, label: "Failed", className: "bg-red-400/15 text-red-200 ring-red-300/20" };
+    case "paused":
+      return { icon: Pause, label: "Paused", className: "bg-amber-400/15 text-amber-100 ring-amber-300/20" };
+    case "cancelled":
+      return { icon: Square, label: "Cancelled", className: "bg-slate-400/15 text-slate-200 ring-slate-300/20" };
+    case "scanning":
+      return { icon: RefreshCcw, label: "Scanning", className: "bg-cyan-400/15 text-cyan-100 ring-cyan-300/20" };
+    case "running":
+      return { icon: Activity, label: "Running", className: "bg-blue-400/15 text-blue-100 ring-blue-300/20" };
+    default:
+      return { icon: Clock3, label: "Pending", className: "bg-white/10 text-slate-200 ring-white/10" };
+  }
 }
 
 export function ProgressPanel({ migrationId }: ProgressPanelProps) {
@@ -132,11 +168,26 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   }
 
   if (error && !progress) {
-    return <p className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p>;
+    return (
+      <Card className="border-red-200 bg-red-50">
+        <div className="flex items-start gap-3 text-red-800">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <h2 className="font-bold">Unable to load migration</h2>
+            <p className="mt-1 text-sm leading-6">{error}</p>
+          </div>
+        </div>
+      </Card>
+    );
   }
 
   if (!progress) {
-    return <Card>Loading migration progress...</Card>;
+    return (
+      <Card className="flex items-center gap-3">
+        <LoaderCircle className="h-5 w-5 animate-spin text-blue-600" />
+        <span className="text-sm font-semibold text-slate-700">Loading migration progress...</span>
+      </Card>
+    );
   }
 
   const currentFileTotalBytes = progress.currentFileTotalBytes ?? 0;
@@ -148,140 +199,230 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
   const etaLabel = formatEta(etaSeconds);
   const reauthRequired = messageNeedsGoogleReauthorization(progress.errorMessage)
     || Boolean(progress.failedItems?.some((item) => messageNeedsGoogleReauthorization(item.error)));
+  const status = statusPresentation(progress.status);
+  const StatusIcon = status.icon;
+  const overallPercentage = Math.min(progress.percentage, 100);
 
   return (
     <div className="space-y-5">
-      {error ? <p className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}
+      {error ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : null}
 
       {progress.errorMessage ? (
-        <p className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-800">{progress.errorMessage}</p>
+        <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{progress.errorMessage}</span>
+        </div>
       ) : null}
 
       {reauthRequired ? (
-        <Card className="border-amber-200 bg-amber-50">
+        <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="font-semibold text-slate-950">Google Drive needs to be reconnected</h3>
-              <p className="mt-1 text-sm text-slate-700">
-                Your migration record is safe. Reconnect Google Drive, return here, then retry the failed transfer.
-              </p>
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white text-amber-600 shadow-sm">
+                <ShieldAlert className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="font-black text-slate-950">Google Drive needs to be reconnected</h3>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-700">
+                  Your migration record is safe. Reconnect Google Drive, return here, then retry the failed transfer.
+                </p>
+              </div>
             </div>
             <GoogleReconnectLink redirectTo={`/migrations/${migrationId}`} />
           </div>
         </Card>
       ) : null}
 
-      <Card>
-        <div className="mb-3 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium uppercase text-slate-500">Status</p>
-            <h2 className="text-2xl font-bold capitalize text-slate-950">{progress.status ?? "pending"}</h2>
-          </div>
-          <strong className="text-3xl text-blue-600">{progress.percentage}%</strong>
-        </div>
-        <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-          <div className="h-full bg-blue-600" style={{ width: `${Math.min(progress.percentage, 100)}%` }} />
-        </div>
-        {progress.status === "running" ? (
-          <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-sm sm:grid-cols-2">
+      <Card className="relative overflow-hidden border-slate-900 bg-slate-950 p-0 text-white shadow-[0_30px_80px_-44px_rgba(15,23,42,0.85)]">
+        <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-blue-500/20 blur-3xl" />
+        <div className="absolute -bottom-28 left-20 h-52 w-52 rounded-full bg-cyan-400/10 blur-3xl" />
+        <div className="relative p-6 sm:p-7">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className="text-slate-500">Transfer speed</p>
-              <p className="font-semibold text-slate-950">
-                {transferRate ? `${formatBytes(transferRate)}/s` : "Calculating from live progress..."}
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold ring-1 ring-inset ${status.className}`}>
+                <StatusIcon className={`h-3.5 w-3.5 ${progress.status === "scanning" ? "animate-spin" : ""}`} />
+                {status.label}
+              </span>
+              <h2 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">
+                {progress.status === "completed" ? "Migration complete" : progress.status === "failed" ? "Migration needs attention" : "Migration in progress"}
+              </h2>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
+                GDM refreshes this page automatically every few seconds while the worker processes your folder.
               </p>
             </div>
-            <div>
-              <p className="text-slate-500">Estimated time remaining</p>
-              <p className="font-semibold text-slate-950">
-                {etaLabel ?? (transferRate ? "Finishing..." : "Waiting for transfer activity...")}
-              </p>
+            <div className="sm:text-right">
+              <strong className="block text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl">{overallPercentage}%</strong>
+              <span className="mt-1 block text-xs font-medium uppercase tracking-[0.13em] text-slate-500">Overall progress</span>
             </div>
           </div>
-        ) : null}
+
+          <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/5">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400 transition-[width] duration-500"
+              style={{ width: `${overallPercentage}%` }}
+            />
+          </div>
+
+          {progress.status === "running" ? (
+            <div className="mt-6 grid gap-3 border-t border-white/10 pt-5 sm:grid-cols-2">
+              <div className="rounded-2xl bg-white/[0.06] p-4 ring-1 ring-white/5">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                  <Gauge className="h-4 w-4 text-cyan-300" /> Transfer speed
+                </div>
+                <p className="mt-2 text-lg font-black text-white">
+                  {transferRate ? `${formatBytes(transferRate)}/s` : "Calculating..."}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white/[0.06] p-4 ring-1 ring-white/5">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                  <Timer className="h-4 w-4 text-emerald-300" /> Estimated time
+                </div>
+                <p className="mt-2 text-lg font-black text-white">
+                  {etaLabel ?? (transferRate ? "Finishing..." : "Waiting for activity...")}
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </Card>
 
       {active ? (
         <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="font-semibold text-slate-950">Migration controls</h3>
-            <p className="text-sm text-slate-600">
-              Pause keeps resumable upload progress. Cancel stops the migration permanently.
+            <h3 className="font-black text-slate-950">Migration controls</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Pause preserves resumable upload progress. Cancel permanently stops this migration.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={pauseMigration} disabled={pausing || cancelling}>
+            <Button variant="secondary" onClick={pauseMigration} disabled={pausing || cancelling}>
+              {pausing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
               {pausing ? "Pausing..." : "Pause"}
             </Button>
-            <Button onClick={cancelMigration} disabled={cancelling || pausing}>
-              {cancelling ? "Cancelling..." : "Cancel migration"}
+            <Button variant="danger" onClick={cancelMigration} disabled={cancelling || pausing}>
+              {cancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+              {cancelling ? "Cancelling..." : "Cancel"}
             </Button>
           </div>
         </Card>
       ) : null}
 
       {progress.status === "paused" ? (
-        <Card className="flex flex-col gap-4 border-amber-200 bg-amber-50 sm:flex-row sm:items-center sm:justify-between">
+        <Card className="flex flex-col gap-4 border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="font-semibold text-slate-950">Migration paused</h3>
-            <p className="text-sm text-slate-600">
-              Completed files stay completed, and resumable large-file sessions keep their confirmed byte position.
+            <div className="mb-2 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.13em] text-amber-700"><Pause className="h-4 w-4" /> Paused safely</div>
+            <h3 className="font-black text-slate-950">Pick up where you left off</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Completed files stay complete and large-file resumable sessions keep their confirmed byte position.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={resumeMigration} disabled={resuming || cancelling}>
-              {resuming ? "Resuming..." : "Resume migration"}
+              {resuming ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {resuming ? "Resuming..." : "Resume"}
             </Button>
-            <Button onClick={cancelMigration} disabled={cancelling || resuming}>
-              {cancelling ? "Cancelling..." : "Cancel migration"}
+            <Button variant="danger" onClick={cancelMigration} disabled={cancelling || resuming}>
+              {cancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+              {cancelling ? "Cancelling..." : "Cancel"}
             </Button>
           </div>
         </Card>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card><p className="text-sm text-slate-500">Completed</p><strong className="text-3xl">{progress.completedFiles}</strong></Card>
-        <Card><p className="text-sm text-slate-500">Failed</p><strong className="text-3xl">{progress.failedFiles}</strong></Card>
-        <Card><p className="text-sm text-slate-500">Total Files</p><strong className="text-3xl">{progress.totalFiles}</strong></Card>
+      <section className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.13em] text-slate-500">Completed</p>
+              <strong className="mt-2 block text-3xl font-black text-slate-950">{progress.completedFiles.toLocaleString()}</strong>
+            </div>
+            <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><CheckCircle2 className="h-5 w-5" /></span>
+          </div>
+        </Card>
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.13em] text-slate-500">Failed</p>
+              <strong className="mt-2 block text-3xl font-black text-slate-950">{progress.failedFiles.toLocaleString()}</strong>
+            </div>
+            <span className="grid h-10 w-10 place-items-center rounded-2xl bg-red-50 text-red-600"><XCircle className="h-5 w-5" /></span>
+          </div>
+        </Card>
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.13em] text-slate-500">Total files</p>
+              <strong className="mt-2 block text-3xl font-black text-slate-950">{progress.totalFiles.toLocaleString()}</strong>
+            </div>
+            <span className="grid h-10 w-10 place-items-center rounded-2xl bg-blue-50 text-blue-600"><File className="h-5 w-5" /></span>
+          </div>
+        </Card>
       </section>
 
       <Card>
-        <dl className="grid gap-3 text-sm text-slate-700 md:grid-cols-2">
-          <div><dt className="text-slate-500">Current file</dt><dd className="font-medium">{progress.currentFile ?? "-"}</dd></div>
-          <div><dt className="text-slate-500">Bytes copied</dt><dd className="font-medium">{formatBytes(progress.copiedBytes)} / {formatBytes(progress.totalBytes)}</dd></div>
+        <div className="mb-5 flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-cyan-50 text-cyan-600"><Activity className="h-5 w-5" /></span>
+          <div>
+            <h3 className="font-black text-slate-950">Current transfer</h3>
+            <p className="text-xs text-slate-500">Live worker activity and copied data.</p>
+          </div>
+        </div>
+
+        <dl className="grid gap-4 text-sm md:grid-cols-2">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <dt className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Current file</dt>
+            <dd className="mt-2 truncate font-bold text-slate-950">{progress.currentFile ?? "Waiting for next file"}</dd>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <dt className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Data copied</dt>
+            <dd className="mt-2 font-bold text-slate-950">{formatBytes(progress.copiedBytes)} <span className="font-medium text-slate-400">/ {formatBytes(progress.totalBytes)}</span></dd>
+          </div>
         </dl>
 
         {hasCurrentFileProgress ? (
-          <div className="mt-5 space-y-2">
-            <div className="flex items-center justify-between gap-4 text-sm">
-              <span className="text-slate-500">Current file transfer</span>
-              <span className="font-medium text-slate-700">
+          <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+            <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <span className="font-bold text-blue-950">Current file progress</span>
+              <span className="text-xs font-medium text-blue-700">
                 {formatBytes(progress.currentFileUploadedBytes)} / {formatBytes(progress.currentFileTotalBytes)} · {currentFilePercentage}%
               </span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full bg-blue-600" style={{ width: `${currentFilePercentage}%` }} />
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-blue-100">
+              <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 transition-[width] duration-500" style={{ width: `${currentFilePercentage}%` }} />
             </div>
           </div>
         ) : null}
       </Card>
 
       {progress.failedItems?.length ? (
-        <Card>
-          <div className="mb-4">
-            <h3 className="font-semibold text-slate-950">Failed files</h3>
-            <p className="text-sm text-slate-600">Showing the latest {progress.failedItems.length} failures and why they stopped.</p>
+        <Card className="overflow-hidden p-0">
+          <div className="border-b border-slate-100 bg-red-50/60 px-5 py-4 sm:px-6">
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-red-600 shadow-sm"><AlertTriangle className="h-4 w-4" /></span>
+              <div>
+                <h3 className="font-black text-slate-950">Failed files</h3>
+                <p className="text-xs text-slate-500">Latest {progress.failedItems.length} failures and the reason each one stopped.</p>
+              </div>
+            </div>
           </div>
           <div className="divide-y divide-slate-100">
             {progress.failedItems.map((item) => (
-              <div key={item.id} className="py-3 first:pt-0 last:pb-0">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div key={item.id} className="px-5 py-4 sm:px-6">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-slate-950">{item.name}</p>
-                    <p className="truncate text-xs text-slate-500">{item.path}</p>
+                    <p className="truncate font-bold text-slate-950">{item.name}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{item.path}</p>
+                    {item.error ? <p className="mt-2 text-sm leading-6 text-red-700">{item.error}</p> : null}
                   </div>
-                  <span className="shrink-0 text-xs text-slate-500">{item.retryCount} attempt{item.retryCount === 1 ? "" : "s"}</span>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">
+                    {item.retryCount} attempt{item.retryCount === 1 ? "" : "s"}
+                  </span>
                 </div>
-                {item.error ? <p className="mt-2 text-sm text-red-700">{item.error}</p> : null}
               </div>
             ))}
           </div>
@@ -289,16 +430,18 @@ export function ProgressPanel({ migrationId }: ProgressPanelProps) {
       ) : null}
 
       {progress.status === "failed" && progress.failedFiles > 0 ? (
-        <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Card className="flex flex-col gap-4 border-red-200 bg-gradient-to-br from-red-50 to-orange-50 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="font-semibold text-slate-950">Some files did not transfer.</h3>
-            <p className="text-sm text-slate-600">
+            <div className="mb-2 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.13em] text-red-700"><RotateCcw className="h-4 w-4" /> Recovery</div>
+            <h3 className="font-black text-slate-950">Retry only what failed</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
               {reauthRequired
-                ? "Reconnect Google Drive first, then retry only the failed files."
-                : "Retry only the failed files without rebuilding the migration."}
+                ? "Reconnect Google Drive first, then retry the failed files."
+                : "Completed files stay untouched. GDM will only queue the failed items again."}
             </p>
           </div>
           <Button onClick={retryFailedFiles} disabled={retrying || reauthRequired}>
+            {retrying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
             {retrying ? "Retrying..." : `Retry ${progress.failedFiles} failed`}
           </Button>
         </Card>

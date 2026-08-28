@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
-import { isAdminEmail } from "@/lib/env";
+import { SiteHeader } from "@/components/site-header";
+import { isAdminEmail, isGoogleOAuthConfigured } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,10 +23,16 @@ export const metadata: Metadata = {
 
 export default async function AdminLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const session = await auth();
+  const email = session?.user?.email;
 
-  if (!isAdminEmail(session?.user?.email)) {
+  if (!isAdminEmail(email)) {
     notFound();
   }
 
-  return children;
+  return (
+    <>
+      <SiteHeader email={email} authConfigured={isGoogleOAuthConfigured()} isAdmin />
+      {children}
+    </>
+  );
 }
