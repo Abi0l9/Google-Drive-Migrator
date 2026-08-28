@@ -1,8 +1,22 @@
 "use client";
 
 import { useState } from "react";
+import {
+  ArrowRight,
+  Check,
+  FileStack,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  HardDrive,
+  Link2,
+  LoaderCircle,
+  Search,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import { GoogleReconnectLink } from "@/components/google-reconnect-link";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, cn } from "@/components/ui";
 import { formatBytes } from "@/lib/format";
 import { GOOGLE_REAUTH_REQUIRED } from "@/lib/google/auth-errors";
 import type { SignedFolderAnalysis } from "@/types/migration";
@@ -285,107 +299,266 @@ export function AnalyzerForm({ isAuthenticated, authConfigured }: AnalyzerFormPr
   const destinationName = destinationMode === "root" ? "My Drive" : pickedDestinationName;
 
   return (
-    <Card className="space-y-5">
-      <div>
-        <label className="mb-2 block text-sm font-medium text-slate-700" htmlFor="folderUrl">Public Drive folder URL</label>
-        <input
-          id="folderUrl"
-          value={url}
-          onChange={(event) => updateSourceUrl(event.target.value)}
-          placeholder="https://drive.google.com/drive/folders/xxxxxxxx"
-          aria-describedby="folder-url-help"
-          className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-        />
-        <p id="folder-url-help" className="mt-2 text-xs leading-5 text-slate-500">
-          The source folder must be publicly accessible. GDM never modifies the source.
-        </p>
+    <Card className="overflow-hidden border-white/80 bg-white/95 p-0 shadow-[0_30px_90px_-45px_rgba(37,99,235,0.55)]">
+      <div className="relative overflow-hidden bg-slate-950 px-6 py-6 text-white sm:px-7">
+        <div className="absolute -right-14 -top-20 h-48 w-48 rounded-full bg-blue-500/20 blur-3xl" />
+        <div className="absolute -bottom-24 left-14 h-44 w-44 rounded-full bg-cyan-400/15 blur-3xl" />
+        <div className="relative">
+          <div className="mb-3 flex items-center justify-between gap-4">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-cyan-100">
+              <Sparkles className="h-3 w-3" />
+              New migration
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              Source untouched
+            </span>
+          </div>
+          <h2 className="text-2xl font-black tracking-tight">Move your folder</h2>
+          <p className="mt-1.5 max-w-md text-sm leading-6 text-slate-300">
+            Give GDM a public Drive folder. We’ll inspect it first, then you choose exactly where the copy should land.
+          </p>
+        </div>
       </div>
 
-      <Button onClick={analyze} disabled={loading || !url.trim()}>{loading ? "Analyzing..." : "Analyze Folder"}</Button>
-
-      {error ? <p role="alert" aria-live="polite" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
-      {reauthRequired ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="mb-3 text-sm text-amber-900">Your GDM session is still open, but Google Drive permission needs a fresh connection.</p>
-          <GoogleReconnectLink redirectTo="/" />
-        </div>
-      ) : null}
-
-      {analysis ? (
-        <div className="space-y-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Ready to migrate</p>
-            <h3 className="mb-3 text-lg font-semibold text-slate-950">{analysis.folderName}</h3>
-            <dl className="grid grid-cols-3 gap-3">
-              <div><dt>Files</dt><dd className="font-bold">{analysis.files}</dd></div>
-              <div><dt>Folders</dt><dd className="font-bold">{analysis.folders}</dd></div>
-              <div><dt>Size</dt><dd className="font-bold">{formatBytes(analysis.size)}</dd></div>
-            </dl>
+      <div className="space-y-6 p-5 sm:p-7">
+        <section>
+          <div className="mb-3 flex items-center gap-3">
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-blue-600 text-xs font-black text-white">1</span>
+            <div>
+              <h3 className="text-sm font-bold text-slate-950">Source folder</h3>
+              <p className="text-xs text-slate-500">Paste a publicly accessible Google Drive folder URL.</p>
+            </div>
           </div>
 
-          <fieldset className="space-y-3">
-            <legend className="font-medium text-slate-950">Destination</legend>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={destinationMode === "root"}
-                onChange={() => {
-                  setDestinationMode("root");
-                  setError(null);
-                  setReauthRequired(false);
-                }}
-              />
-              My Drive
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={destinationMode === "folder"}
-                onChange={() => {
-                  setDestinationMode("folder");
-                  setError(null);
-                  setReauthRequired(false);
-                }}
-              />
-              Choose an existing folder
-            </label>
+          <div className="relative">
+            <Link2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              id="folderUrl"
+              value={url}
+              onChange={(event) => updateSourceUrl(event.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              aria-describedby="folder-url-help"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </div>
+          <p id="folder-url-help" className="mt-2 text-xs leading-5 text-slate-500">
+            Anyone with the link must be able to view the source folder.
+          </p>
 
-            {destinationMode === "folder" ? (
-              <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-                <Button type="button" onClick={chooseDestinationFolder} disabled={pickingDestination || !isAuthenticated}>
-                  {pickingDestination ? "Opening Drive..." : pickedDestinationName ? "Change destination" : "Choose from Google Drive"}
-                </Button>
-                {pickedDestinationName ? (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                    Selected: {pickedDestinationName}
-                  </div>
-                ) : (
-                  <p className="text-xs leading-5 text-slate-500">
-                    Google Picker grants GDM access only to the folder you explicitly choose.
-                  </p>
-                )}
-                {!isAuthenticated ? <p className="text-xs text-slate-600">Sign in with Google to choose a destination folder.</p> : null}
-              </div>
-            ) : null}
-          </fieldset>
-
-          {destinationName ? (
-            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-              GDM will create <strong>{analysis.folderName}</strong> inside <strong>{destinationName}</strong>.
-            </div>
-          ) : null}
-
-          <Button
-            onClick={startMigration}
-            disabled={creating || !isAuthenticated || !destinationReady}
-          >
-            {creating ? "Starting..." : "Start Migration"}
+          <Button className="mt-4 w-full" size="lg" onClick={analyze} disabled={loading || !url.trim()}>
+            {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            {loading ? "Analyzing folder..." : "Analyze folder"}
           </Button>
+        </section>
 
-          {!authConfigured ? <p className="text-sm text-red-700">Google sign-in is not configured for this deployment.</p> : null}
-          {authConfigured && !isAuthenticated ? <p className="text-sm text-slate-600">Sign in with Google before starting a migration.</p> : null}
-        </div>
-      ) : null}
+        {error ? (
+          <p role="alert" aria-live="polite" className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">
+            {error}
+          </p>
+        ) : null}
+
+        {reauthRequired ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="mb-3 text-sm leading-6 text-amber-900">
+              Your GDM session is still open, but Google Drive permission needs a fresh connection.
+            </p>
+            <GoogleReconnectLink redirectTo="/" />
+          </div>
+        ) : null}
+
+        {analysis ? (
+          <>
+            <section className="border-t border-slate-100 pt-6">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-cyan-500 text-xs font-black text-white">2</span>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-slate-950">Review the source</h3>
+                  <p className="truncate text-xs text-slate-500">{analysis.folderName}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/80 to-cyan-50/60 p-4">
+                <div className="mb-4 flex items-start gap-3">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white text-emerald-600 shadow-sm">
+                    <FolderTree className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h4 className="truncate font-bold text-slate-950">{analysis.folderName}</h4>
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                        <Check className="h-3 w-3" /> Ready
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-600">GDM has mapped the folder before any transfer begins.</p>
+                  </div>
+                </div>
+
+                <dl className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl bg-white/80 p-3 shadow-sm">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500"><FileStack className="h-3.5 w-3.5" /> Files</dt>
+                    <dd className="mt-1 text-lg font-black text-slate-950">{analysis.files.toLocaleString()}</dd>
+                  </div>
+                  <div className="rounded-xl bg-white/80 p-3 shadow-sm">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500"><Folder className="h-3.5 w-3.5" /> Folders</dt>
+                    <dd className="mt-1 text-lg font-black text-slate-950">{analysis.folders.toLocaleString()}</dd>
+                  </div>
+                  <div className="rounded-xl bg-white/80 p-3 shadow-sm">
+                    <dt className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500"><HardDrive className="h-3.5 w-3.5" /> Size</dt>
+                    <dd className="mt-1 truncate text-lg font-black text-slate-950">{formatBytes(analysis.size)}</dd>
+                  </div>
+                </dl>
+              </div>
+            </section>
+
+            <section className="border-t border-slate-100 pt-6">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-500 text-xs font-black text-white">3</span>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950">Choose destination</h3>
+                  <p className="text-xs text-slate-500">GDM creates the migrated root folder inside your choice.</p>
+                </div>
+              </div>
+
+              <fieldset>
+                <legend className="sr-only">Destination</legend>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className={cn(
+                    "cursor-pointer rounded-2xl border p-4 transition",
+                    destinationMode === "root"
+                      ? "border-blue-300 bg-blue-50 shadow-[0_10px_30px_-22px_rgba(37,99,235,0.8)]"
+                      : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/40",
+                  )}>
+                    <input
+                      className="sr-only"
+                      type="radio"
+                      name="destination"
+                      checked={destinationMode === "root"}
+                      onChange={() => {
+                        setDestinationMode("root");
+                        setError(null);
+                        setReauthRequired(false);
+                      }}
+                    />
+                    <div className="flex items-start gap-3">
+                      <span className={cn(
+                        "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
+                        destinationMode === "root" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500",
+                      )}>
+                        <HardDrive className="h-4 w-4" />
+                      </span>
+                      <span>
+                        <strong className="block text-sm text-slate-950">My Drive</strong>
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">Create it at the top level of your Drive.</span>
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className={cn(
+                    "cursor-pointer rounded-2xl border p-4 transition",
+                    destinationMode === "folder"
+                      ? "border-blue-300 bg-blue-50 shadow-[0_10px_30px_-22px_rgba(37,99,235,0.8)]"
+                      : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/40",
+                  )}>
+                    <input
+                      className="sr-only"
+                      type="radio"
+                      name="destination"
+                      checked={destinationMode === "folder"}
+                      onChange={() => {
+                        setDestinationMode("folder");
+                        setError(null);
+                        setReauthRequired(false);
+                      }}
+                    />
+                    <div className="flex items-start gap-3">
+                      <span className={cn(
+                        "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
+                        destinationMode === "folder" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500",
+                      )}>
+                        <FolderOpen className="h-4 w-4" />
+                      </span>
+                      <span>
+                        <strong className="block text-sm text-slate-950">Existing folder</strong>
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">Pick a destination with Google Picker.</span>
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
+                {destinationMode === "folder" ? (
+                  <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={chooseDestinationFolder}
+                      disabled={pickingDestination || !isAuthenticated}
+                    >
+                      {pickingDestination ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
+                      {pickingDestination ? "Opening Google Drive..." : pickedDestinationName ? "Change destination" : "Choose from Google Drive"}
+                    </Button>
+                    {pickedDestinationName ? (
+                      <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-medium text-emerald-800">
+                        <Check className="h-4 w-4" />
+                        <span className="truncate">{pickedDestinationName}</span>
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs leading-5 text-slate-500">
+                        Picker grants GDM access only to the folder you explicitly select.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+              </fieldset>
+            </section>
+
+            <section className="border-t border-slate-100 pt-6">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-slate-950 text-xs font-black text-white">4</span>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950">Launch migration</h3>
+                  <p className="text-xs text-slate-500">Your transfer runs through GDM’s worker queue.</p>
+                </div>
+              </div>
+
+              {destinationName ? (
+                <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm leading-6 text-blue-950">
+                  <span className="text-blue-600">Destination:</span> GDM will create <strong>{analysis.folderName}</strong> inside <strong>{destinationName}</strong>.
+                </div>
+              ) : null}
+
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={startMigration}
+                disabled={creating || !isAuthenticated || !destinationReady}
+              >
+                {creating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                {creating ? "Starting migration..." : "Start migration"}
+              </Button>
+
+              {!authConfigured ? (
+                <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">Google sign-in is not configured for this deployment.</p>
+              ) : null}
+              {authConfigured && !isAuthenticated ? (
+                <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                  Sign in with Google from the top of the page before starting the transfer.
+                </p>
+              ) : null}
+            </section>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">After analysis</p>
+            <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-3">
+              <span className="rounded-xl bg-white px-3 py-2.5 shadow-sm">Review files + size</span>
+              <span className="rounded-xl bg-white px-3 py-2.5 shadow-sm">Choose destination</span>
+              <span className="rounded-xl bg-white px-3 py-2.5 shadow-sm">Launch + track</span>
+            </div>
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
