@@ -57,6 +57,18 @@ export default async function Home() {
           </Card>
         ))}
       </section>
+
+      <footer className="mt-auto border-t border-slate-200 pt-6 text-center text-xs text-slate-500">
+        Built by{" "}
+        <a
+          href="https://tech.innovvohq.online"
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-slate-700 underline-offset-4 hover:underline"
+        >
+          Innovvo Tech
+        </a>
+      </footer>
     </main>
   );
 }
